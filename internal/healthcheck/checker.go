@@ -176,6 +176,7 @@ func checkScript(ctx context.Context, timeout time.Duration, cfg *config.ScriptH
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", cfg.Command)
+	cmd.WaitDelay = time.Second
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
