@@ -96,6 +96,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 		go d.discoveryLoop(ctx)
 	}
 
+	if d.hasTimerMonitoring() {
+		go d.timerMonitorLoop(ctx)
+	}
+
 	if err := d.ListenSocket(ctx); err != nil {
 		return fmt.Errorf("starting socket listener: %w", err)
 	}
@@ -218,6 +222,65 @@ func (d *Daemon) discoveryLoop(ctx context.Context) {
 				}
 
 				d.discoverInstances(ctx, unit)
+			}
+		}
+	}
+}
+
+func (d *Daemon) hasTimerMonitoring() bool {
+	for i := range d.cfg.Units {
+		if d.cfg.Units[i].Enabled && d.cfg.Units[i].Type == "timer" && d.cfg.Units[i].MaxDelay > 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (d *Daemon) timerMonitorLoop(ctx context.Context) {
+	interval := d.cfg.DiscoveryInterval
+	if interval == 0 {
+		interval = 30 * time.Second
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			d.checkTimers(ctx)
+		}
+	}
+}
+
+func (d *Daemon) checkTimers(ctx context.Context) {
+	for i := range d.cfg.Units {
+		unit := &d.cfg.Units[i]
+		if !unit.Enabled || unit.Type != "timer" || unit.MaxDelay == 0 {
+			continue
+		}
+
+		unitName := unit.UnitName()
+
+		lastTrigger, err := d.mgr.GetTimerLastTrigger(ctx, unitName)
+		if err != nil {
+			slog.Error("getting timer last trigger", "unit", unitName, "error", err)
+
+			continue
+		}
+
+		if lastTrigger.IsZero() {
+			continue
+		}
+
+		if time.Since(lastTrigger) > unit.MaxDelay {
+			slog.Warn("timer overdue, restarting", "unit", unitName, "last_trigger", lastTrigger, "max_delay", unit.MaxDelay)
+
+			if err := d.mgr.Restart(ctx, unitName); err != nil {
+				slog.Error("restarting overdue timer", "unit", unitName, "error", err)
 			}
 		}
 	}

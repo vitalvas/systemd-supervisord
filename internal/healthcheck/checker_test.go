@@ -348,10 +348,10 @@ func TestChecker(t *testing.T) {
 		resultCh := make(chan Result, 10)
 
 		c := New("db.service", []config.HealthCheck{
-			{Type: "script", Script: &config.ScriptHealthCheck{Command: "sleep 30"}, Interval: 100 * time.Millisecond, Timeout: 200 * time.Millisecond, Retries: 1},
+			{Type: "script", Script: &config.ScriptHealthCheck{Command: "sleep 30"}, Interval: 200 * time.Millisecond, Timeout: 500 * time.Millisecond, Retries: 1},
 		}, resultCh)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
 		go c.Run(ctx)

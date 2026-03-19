@@ -22,6 +22,9 @@ func (m *mockManager) Close() error                            { return nil }
 func (m *mockManager) GetUnitState(_ context.Context, _ string) (*systemd.UnitState, error) {
 	return nil, nil
 }
+func (m *mockManager) GetTimerLastTrigger(_ context.Context, _ string) (time.Time, error) {
+	return time.Time{}, nil
+}
 func (m *mockManager) ListUnits(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }
@@ -44,6 +47,9 @@ func (m *failingMockManager) Stop(_ context.Context, _ string) error  { return n
 func (m *failingMockManager) Close() error                            { return nil }
 func (m *failingMockManager) GetUnitState(_ context.Context, _ string) (*systemd.UnitState, error) {
 	return nil, nil
+}
+func (m *failingMockManager) GetTimerLastTrigger(_ context.Context, _ string) (time.Time, error) {
+	return time.Time{}, nil
 }
 func (m *failingMockManager) ListUnits(_ context.Context, _ string) ([]string, error) {
 	return nil, nil

@@ -39,6 +39,7 @@ Each entry in the `units` list defines a systemd unit to supervise.
 | `discover`      | bool     | No       | `false` | Auto-discover running instances of template units. Required for template units (name ending with `@`). |
 | `depends_on`    | list     | No       | --      | Unit names that must start before this unit.               |
 | `grace_period`  | duration | No       | `0s`    | Delay before health checks begin. Useful for slow-starting services. |
+| `max_delay`     | duration | No       | --      | Maximum allowed time since last timer trigger. Timer-only. If exceeded, the timer is restarted. Minimum: `1s`. |
 | `health_checks` | list     | No       | --      | List of health check configurations.                       |
 | `restart`       | object   | No       | --      | Restart policy for unhealthy units.                        |
 
@@ -54,6 +55,36 @@ units:
 ```
 
 This supervises `nginx.service`.
+
+### Timer Units
+
+Timer units monitor systemd timers. Since timers do not have network endpoints, health checks are not applicable. Use timer supervision to track state changes and receive notifications when a timer fails:
+
+```yaml
+units:
+  - name: certbot-renew
+    type: timer
+    enabled: true
+  - name: logrotate
+    type: timer
+    enabled: true
+```
+
+This supervises `certbot-renew.timer` and `logrotate.timer`.
+
+### Timer Execution Monitoring
+
+Use `max_delay` to ensure a timer has triggered within a required time window. The daemon periodically checks `LastTriggerUSec` from systemd. If the elapsed time since the last trigger exceeds `max_delay`, the timer is restarted:
+
+```yaml
+units:
+  - name: certbot-renew
+    type: timer
+    enabled: true
+    max_delay: 48h
+```
+
+If `certbot-renew.timer` has not triggered in the last 48 hours, the daemon restarts it. The check interval follows the `discovery_interval` setting. Timers that have never triggered (zero last trigger) are skipped.
 
 ### Template Units
 

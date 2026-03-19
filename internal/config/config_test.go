@@ -497,6 +497,44 @@ notify:
 	})
 }
 
+func TestMaxDelay(t *testing.T) {
+	t.Run("timer with max_delay", func(t *testing.T) {
+		content := `
+units:
+  - name: certbot-renew
+    type: timer
+    enabled: true
+    max_delay: 24h
+`
+		cfg := loadFromString(t, content)
+		assert.Equal(t, 24*time.Hour, cfg.Units[0].MaxDelay)
+	})
+
+	t.Run("max_delay zero by default", func(t *testing.T) {
+		content := `
+units:
+  - name: certbot-renew
+    type: timer
+    enabled: true
+`
+		cfg := loadFromString(t, content)
+		assert.Equal(t, time.Duration(0), cfg.Units[0].MaxDelay)
+	})
+
+	t.Run("max_delay on service rejected", func(t *testing.T) {
+		content := `
+units:
+  - name: app
+    type: service
+    enabled: true
+    max_delay: 10s
+`
+		_, err := loadStringConfig(content)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "max_delay is only allowed on timer units")
+	})
+}
+
 func TestDependencies(t *testing.T) {
 	t.Run("valid dependencies", func(t *testing.T) {
 		content := `

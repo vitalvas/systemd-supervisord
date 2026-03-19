@@ -135,9 +135,17 @@ units:
       backoff: 15s
       cooldown: 180s
 
+  # Timer unit with execution monitoring
+  # Restart if the timer has not triggered within max_delay
   - name: certbot-renew
     type: timer
     enabled: true
+    max_delay: 48h
+
+  - name: salt-minion-state-highstate
+    type: timer
+    enabled: true
+    max_delay: 1h
 
 notify:
   # Custom variables included in all notifications

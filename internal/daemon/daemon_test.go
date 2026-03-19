@@ -20,28 +20,32 @@ import (
 )
 
 type mockManager struct {
-	mu           sync.Mutex
-	startCalls   []string
-	stopCalls    []string
-	restartCalls []string
-	stateCalls   []string
-	listCalls    []string
-	watchCalls   []string
-	unitStates   map[string]*systemd.UnitState
-	listResult   map[string][]string
-	startErr     error
-	stopErr      error
-	restartErr   error
-	getStateErr  error
-	listErr      error
-	watchErr     error
-	closeCalled  bool
+	mu                sync.Mutex
+	startCalls        []string
+	stopCalls         []string
+	restartCalls      []string
+	stateCalls        []string
+	timerTriggerCalls []string
+	listCalls         []string
+	watchCalls        []string
+	unitStates        map[string]*systemd.UnitState
+	timerTriggers     map[string]time.Time
+	listResult        map[string][]string
+	startErr          error
+	stopErr           error
+	restartErr        error
+	getStateErr       error
+	timerTriggerErr   error
+	listErr           error
+	watchErr          error
+	closeCalled       bool
 }
 
 func newMockManager() *mockManager {
 	return &mockManager{
-		unitStates: make(map[string]*systemd.UnitState),
-		listResult: make(map[string][]string),
+		unitStates:    make(map[string]*systemd.UnitState),
+		timerTriggers: make(map[string]time.Time),
+		listResult:    make(map[string][]string),
 	}
 }
 
@@ -93,6 +97,19 @@ func (m *mockManager) GetUnitState(_ context.Context, unit string) (*systemd.Uni
 	}
 
 	return state, nil
+}
+
+func (m *mockManager) GetTimerLastTrigger(_ context.Context, unit string) (time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.timerTriggerCalls = append(m.timerTriggerCalls, unit)
+
+	if m.timerTriggerErr != nil {
+		return time.Time{}, m.timerTriggerErr
+	}
+
+	return m.timerTriggers[unit], nil
 }
 
 func (m *mockManager) ListUnits(_ context.Context, prefix string) ([]string, error) {
@@ -1039,6 +1056,228 @@ func TestReload(t *testing.T) {
 		d.reload()
 
 		assert.Equal(t, "original", d.cfg.Units[0].Name)
+	})
+}
+
+func TestHasTimerMonitoring(t *testing.T) {
+	t.Run("no timer units", func(t *testing.T) {
+		d := &Daemon{
+			cfg: &config.Config{
+				Units: []config.UnitConfig{
+					{Name: "app", Type: "service", Enabled: true},
+				},
+			},
+		}
+
+		assert.False(t, d.hasTimerMonitoring())
+	})
+
+	t.Run("timer without max_delay", func(t *testing.T) {
+		d := &Daemon{
+			cfg: &config.Config{
+				Units: []config.UnitConfig{
+					{Name: "backup", Type: "timer", Enabled: true},
+				},
+			},
+		}
+
+		assert.False(t, d.hasTimerMonitoring())
+	})
+
+	t.Run("timer with max_delay", func(t *testing.T) {
+		d := &Daemon{
+			cfg: &config.Config{
+				Units: []config.UnitConfig{
+					{Name: "backup", Type: "timer", Enabled: true, MaxDelay: 24 * time.Hour},
+				},
+			},
+		}
+
+		assert.True(t, d.hasTimerMonitoring())
+	})
+
+	t.Run("disabled timer with max_delay", func(t *testing.T) {
+		d := &Daemon{
+			cfg: &config.Config{
+				Units: []config.UnitConfig{
+					{Name: "backup", Type: "timer", Enabled: false, MaxDelay: 24 * time.Hour},
+				},
+			},
+		}
+
+		assert.False(t, d.hasTimerMonitoring())
+	})
+}
+
+func TestCheckTimers(t *testing.T) {
+	t.Run("restarts overdue timer", func(t *testing.T) {
+		mgr := newMockManager()
+		mgr.timerTriggers["backup.timer"] = time.Now().Add(-25 * time.Hour)
+
+		cfg := &config.Config{
+			Units: []config.UnitConfig{
+				{Name: "backup", Type: "timer", Enabled: true, MaxDelay: 24 * time.Hour},
+			},
+		}
+		d := newTestDaemon(mgr, cfg)
+
+		d.checkTimers(context.Background())
+
+		mgr.mu.Lock()
+		defer mgr.mu.Unlock()
+
+		assert.Contains(t, mgr.restartCalls, "backup.timer")
+	})
+
+	t.Run("does not restart recent timer", func(t *testing.T) {
+		mgr := newMockManager()
+		mgr.timerTriggers["backup.timer"] = time.Now().Add(-1 * time.Hour)
+
+		cfg := &config.Config{
+			Units: []config.UnitConfig{
+				{Name: "backup", Type: "timer", Enabled: true, MaxDelay: 24 * time.Hour},
+			},
+		}
+		d := newTestDaemon(mgr, cfg)
+
+		d.checkTimers(context.Background())
+
+		mgr.mu.Lock()
+		defer mgr.mu.Unlock()
+
+		assert.Empty(t, mgr.restartCalls)
+	})
+
+	t.Run("skips timer with zero last trigger", func(t *testing.T) {
+		mgr := newMockManager()
+
+		cfg := &config.Config{
+			Units: []config.UnitConfig{
+				{Name: "backup", Type: "timer", Enabled: true, MaxDelay: 24 * time.Hour},
+			},
+		}
+		d := newTestDaemon(mgr, cfg)
+
+		d.checkTimers(context.Background())
+
+		mgr.mu.Lock()
+		defer mgr.mu.Unlock()
+
+		assert.Empty(t, mgr.restartCalls)
+	})
+
+	t.Run("skips disabled units", func(t *testing.T) {
+		mgr := newMockManager()
+		mgr.timerTriggers["backup.timer"] = time.Now().Add(-25 * time.Hour)
+
+		cfg := &config.Config{
+			Units: []config.UnitConfig{
+				{Name: "backup", Type: "timer", Enabled: false, MaxDelay: 24 * time.Hour},
+			},
+		}
+		d := newTestDaemon(mgr, cfg)
+
+		d.checkTimers(context.Background())
+
+		mgr.mu.Lock()
+		defer mgr.mu.Unlock()
+
+		assert.Empty(t, mgr.restartCalls)
+		assert.Empty(t, mgr.timerTriggerCalls)
+	})
+
+	t.Run("skips service units", func(t *testing.T) {
+		mgr := newMockManager()
+
+		cfg := &config.Config{
+			Units: []config.UnitConfig{
+				{Name: "app", Type: "service", Enabled: true},
+			},
+		}
+		d := newTestDaemon(mgr, cfg)
+
+		d.checkTimers(context.Background())
+
+		mgr.mu.Lock()
+		defer mgr.mu.Unlock()
+
+		assert.Empty(t, mgr.timerTriggerCalls)
+	})
+
+	t.Run("handles get trigger error gracefully", func(t *testing.T) {
+		mgr := newMockManager()
+		mgr.timerTriggerErr = fmt.Errorf("dbus error")
+
+		cfg := &config.Config{
+			Units: []config.UnitConfig{
+				{Name: "backup", Type: "timer", Enabled: true, MaxDelay: 24 * time.Hour},
+			},
+		}
+		d := newTestDaemon(mgr, cfg)
+
+		d.checkTimers(context.Background())
+
+		mgr.mu.Lock()
+		defer mgr.mu.Unlock()
+
+		assert.Empty(t, mgr.restartCalls)
+	})
+
+	t.Run("handles restart error gracefully", func(t *testing.T) {
+		mgr := newMockManager()
+		mgr.timerTriggers["backup.timer"] = time.Now().Add(-25 * time.Hour)
+		mgr.restartErr = fmt.Errorf("restart failed")
+
+		cfg := &config.Config{
+			Units: []config.UnitConfig{
+				{Name: "backup", Type: "timer", Enabled: true, MaxDelay: 24 * time.Hour},
+			},
+		}
+		d := newTestDaemon(mgr, cfg)
+
+		d.checkTimers(context.Background())
+
+		mgr.mu.Lock()
+		defer mgr.mu.Unlock()
+
+		assert.Contains(t, mgr.restartCalls, "backup.timer")
+	})
+}
+
+func TestTimerMonitorLoop(t *testing.T) {
+	t.Run("checks timers periodically and exits on cancel", func(t *testing.T) {
+		mgr := newMockManager()
+		mgr.timerTriggers["backup.timer"] = time.Now().Add(-25 * time.Hour)
+
+		cfg := &config.Config{
+			DiscoveryInterval: 50 * time.Millisecond,
+			Units: []config.UnitConfig{
+				{Name: "backup", Type: "timer", Enabled: true, MaxDelay: 24 * time.Hour},
+			},
+		}
+		d := newTestDaemon(mgr, cfg)
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			d.timerMonitorLoop(ctx)
+		}()
+
+		require.Eventually(t, func() bool {
+			mgr.mu.Lock()
+			defer mgr.mu.Unlock()
+			return len(mgr.restartCalls) >= 1
+		}, 2*time.Second, 10*time.Millisecond)
+
+		cancel()
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timerMonitorLoop did not exit on context cancellation")
+		}
 	})
 }
 

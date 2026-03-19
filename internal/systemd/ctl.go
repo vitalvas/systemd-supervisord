@@ -49,6 +49,28 @@ func (m *CtlManager) GetUnitState(ctx context.Context, unit string) (*UnitState,
 	}, nil
 }
 
+func (m *CtlManager) GetTimerLastTrigger(ctx context.Context, unit string) (time.Time, error) {
+	out, err := exec.CommandContext(ctx, "systemctl", "show", unit,
+		"--property=LastTriggerUSec").Output()
+	if err != nil {
+		return time.Time{}, fmt.Errorf("getting timer properties for %s: %w", unit, err)
+	}
+
+	props := parseProperties(string(out))
+
+	val, ok := props["LastTriggerUSec"]
+	if !ok || val == "" || val == "n/a" {
+		return time.Time{}, nil
+	}
+
+	t, err := time.Parse("Mon 2006-01-02 15:04:05 MST", val)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parsing LastTriggerUSec for %s: %w", unit, err)
+	}
+
+	return t, nil
+}
+
 func (m *CtlManager) ListUnits(ctx context.Context, prefix string) ([]string, error) {
 	out, err := exec.CommandContext(ctx, "systemctl", "list-units",
 		"--type=service,timer", "--no-legend", "--no-pager", "--plain",

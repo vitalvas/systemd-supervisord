@@ -8,6 +8,7 @@ A supervisor daemon for systemd services and timers. It monitors unit health, au
 - **HTTP Health Check Options** -- Custom method, expected status code, response body matching, and custom headers
 - **Automatic Restart** -- Restart unhealthy services with exponential backoff and cooldown periods
 - **Template Units** -- Support for systemd template/instanced units (`name@instance.service`) with explicit instances or auto-discovery
+- **Timer Execution Monitoring** -- Detect overdue timers via `max_delay` and automatically restart them
 - **Auto-Discovery** -- Automatically detect running instances of template units at a configurable interval
 - **Service Dependencies** -- Define startup ordering with `depends_on`, circular dependency detection, and cascade restart of dependents
 - **Grace Period** -- Delay health check start for services with slow startup
@@ -69,6 +70,16 @@ units:
       enabled: true
       backoff: 5s          # initial backoff between restarts
       cooldown: 60s        # minimum time between restart cycles
+```
+
+### Timer units
+
+```yaml
+units:
+  - name: certbot-renew
+    type: timer
+    enabled: true
+    max_delay: 48h       # restart if not triggered within 48 hours
 ```
 
 ### Template units

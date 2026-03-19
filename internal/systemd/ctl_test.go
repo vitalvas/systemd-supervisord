@@ -248,6 +248,57 @@ exit 0
 	})
 }
 
+func TestCtlManager_GetTimerLastTrigger(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		createFakeSystemctl(t, `echo "LastTriggerUSec=Thu 2026-03-19 10:00:00 UTC"`)
+
+		mgr := NewCtlManager()
+		result, err := mgr.GetTimerLastTrigger(context.Background(), "backup.timer")
+		require.NoError(t, err)
+		assert.Equal(t, 2026, result.Year())
+		assert.Equal(t, time.March, result.Month())
+		assert.Equal(t, 19, result.Day())
+	})
+
+	t.Run("never triggered", func(t *testing.T) {
+		createFakeSystemctl(t, `echo "LastTriggerUSec=n/a"`)
+
+		mgr := NewCtlManager()
+		result, err := mgr.GetTimerLastTrigger(context.Background(), "backup.timer")
+		require.NoError(t, err)
+		assert.True(t, result.IsZero())
+	})
+
+	t.Run("empty value", func(t *testing.T) {
+		createFakeSystemctl(t, `echo "LastTriggerUSec="`)
+
+		mgr := NewCtlManager()
+		result, err := mgr.GetTimerLastTrigger(context.Background(), "backup.timer")
+		require.NoError(t, err)
+		assert.True(t, result.IsZero())
+	})
+
+	t.Run("command failure", func(t *testing.T) {
+		createFakeSystemctl(t, `exit 1`)
+
+		mgr := NewCtlManager()
+		result, err := mgr.GetTimerLastTrigger(context.Background(), "backup.timer")
+		assert.Error(t, err)
+		assert.True(t, result.IsZero())
+		assert.Contains(t, err.Error(), "getting timer properties for backup.timer")
+	})
+
+	t.Run("invalid timestamp format", func(t *testing.T) {
+		createFakeSystemctl(t, `echo "LastTriggerUSec=invalid-date"`)
+
+		mgr := NewCtlManager()
+		result, err := mgr.GetTimerLastTrigger(context.Background(), "backup.timer")
+		assert.Error(t, err)
+		assert.True(t, result.IsZero())
+		assert.Contains(t, err.Error(), "parsing LastTriggerUSec")
+	})
+}
+
 func TestCtlManager_ListUnits(t *testing.T) {
 	t.Run("success with units", func(t *testing.T) {
 		createFakeSystemctl(t, `

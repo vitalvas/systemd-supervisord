@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/coreos/go-systemd/v22/dbus"
 )
@@ -97,6 +98,32 @@ func (m *DBusManager) GetUnitState(ctx context.Context, unit string) (*UnitState
 		SubState:    stringProp(props, "SubState"),
 		LoadState:   stringProp(props, "LoadState"),
 	}, nil
+}
+
+func (m *DBusManager) GetTimerLastTrigger(ctx context.Context, unit string) (time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	props, err := m.conn.GetUnitTypePropertiesContext(ctx, unit, "Timer")
+	if err != nil {
+		return time.Time{}, fmt.Errorf("getting timer properties for %s: %w", unit, err)
+	}
+
+	usec, ok := props["LastTriggerUSec"]
+	if !ok {
+		return time.Time{}, nil
+	}
+
+	v, ok := usec.(uint64)
+	if !ok {
+		return time.Time{}, nil
+	}
+
+	if v == 0 {
+		return time.Time{}, nil
+	}
+
+	return time.UnixMicro(int64(v)), nil
 }
 
 func (m *DBusManager) ListUnits(ctx context.Context, prefix string) ([]string, error) {

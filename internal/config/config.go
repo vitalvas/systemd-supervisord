@@ -25,6 +25,7 @@ type UnitConfig struct {
 	Discover     bool           `yaml:"discover"`
 	DependsOn    []string       `yaml:"depends_on"`
 	GracePeriod  time.Duration  `yaml:"grace_period" validate:"omitempty,min=0s"`
+	MaxDelay     time.Duration  `yaml:"max_delay" validate:"omitempty,min=1s"`
 	HealthChecks []HealthCheck  `yaml:"health_checks" validate:"dive"`
 	Restart      *RestartPolicy `yaml:"restart" validate:"omitempty"`
 }
@@ -227,6 +228,10 @@ func validateTemplates(units []UnitConfig) error {
 	for _, u := range units {
 		if u.IsTemplate() && !u.Discover {
 			return fmt.Errorf("template unit %q requires discover: true", u.Name)
+		}
+
+		if u.MaxDelay > 0 && u.Type != "timer" {
+			return fmt.Errorf("max_delay is only allowed on timer units, found on %q", u.Name)
 		}
 	}
 
