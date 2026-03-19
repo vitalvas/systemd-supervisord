@@ -1,0 +1,162 @@
+log_level: info
+socket: /var/run/systemd-supervisord.sock
+discovery_interval: 30s
+
+units:
+  # Static unit - single health check
+  - name: nginx
+    type: service
+    enabled: true
+    health_checks:
+      - type: http
+        interval: 10s
+        timeout: 5s
+        retries: 3
+        http:
+          address: http://localhost:80
+    restart:
+      enabled: true
+      backoff: 5s
+      cooldown: 60s
+
+  # Static unit - multiple health check endpoints
+  # Unit is healthy only when ALL endpoints pass
+  - name: salt-master
+    type: service
+    enabled: true
+    health_checks:
+      - type: tcp
+        interval: 10s
+        timeout: 5s
+        retries: 3
+        tcp:
+          address: localhost:4505
+      - type: tcp
+        interval: 10s
+        timeout: 5s
+        retries: 3
+        tcp:
+          address: localhost:4506
+    restart:
+      enabled: true
+      backoff: 10s
+      cooldown: 120s
+
+  # Individual template instances
+  # Each instance is a separate unit in systemd
+  - name: myapp@shard0
+    type: service
+    enabled: true
+    health_checks:
+      - type: tcp
+        interval: 15s
+        timeout: 5s
+        retries: 3
+        tcp:
+          address: localhost:8080
+    restart:
+      enabled: true
+      backoff: 5s
+      cooldown: 60s
+
+  - name: myapp@shard1
+    type: service
+    enabled: true
+    health_checks:
+      - type: tcp
+        interval: 15s
+        timeout: 5s
+        retries: 3
+        tcp:
+          address: localhost:8081
+    restart:
+      enabled: true
+      backoff: 5s
+      cooldown: 60s
+
+  # Template unit with auto-discovery
+  # Finds all running worker@*.service instances automatically
+  # New instances are picked up every discovery_interval
+  - name: worker@
+    type: service
+    enabled: true
+    discover: true
+    health_checks:
+      - type: http
+        interval: 10s
+        timeout: 5s
+        retries: 3
+        http:
+          address: "http://localhost:{{instance}}/health"
+    restart:
+      enabled: true
+      backoff: 10s
+      cooldown: 120s
+
+  # Unit with script-based health check
+  # Script must exit 0 for healthy, non-zero for unhealthy
+  - name: mydb
+    type: service
+    enabled: true
+    health_checks:
+      - type: script
+        interval: 15s
+        timeout: 10s
+        retries: 3
+        script:
+          command: "pg_isready -h localhost -p 5432"
+    restart:
+      enabled: true
+      backoff: 10s
+      cooldown: 120s
+
+  # Unit with grace period - health checks start after 30s
+  # Useful for services with slow startup
+  - name: elasticsearch
+    type: service
+    enabled: true
+    grace_period: 30s
+    depends_on:
+      - mydb
+    health_checks:
+      - type: http
+        interval: 15s
+        timeout: 10s
+        retries: 3
+        http:
+          address: http://localhost:9200/_cluster/health
+          method: GET
+          expected_status: 200
+          response_match: "\"status\":\"green\""
+          headers:
+            Authorization: "Basic ZWxhc3RpYzpjaGFuZ2VtZQ=="
+    restart:
+      enabled: true
+      backoff: 15s
+      cooldown: 180s
+
+  - name: certbot-renew
+    type: timer
+    enabled: true
+
+notify:
+  # Custom variables included in all notifications
+  # Webhooks: added as "variables" JSON object
+  # Scripts/execs: added as SUPERVISORD_VAR_<KEY> env vars (keys uppercased)
+  variables:
+    hostname: web-01
+    environment: production
+  webhooks:
+    - url: http://alerting.example.com/webhook
+      timeout: 10s
+  scripts:
+    - path: /usr/local/bin/notify-on-failure.sh
+      timeout: 30s
+  # Exec actions - run shell commands on events
+  execs:
+    - command: "logger -t supervisord 'Unit $SUPERVISORD_UNIT_NAME state: $SUPERVISORD_ACTIVE_STATE'"
+      timeout: 10s
+    - command: "/usr/local/bin/restart-hook.sh"
+      timeout: 30s
+      events:
+        - state_changed

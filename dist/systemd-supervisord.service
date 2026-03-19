@@ -1,0 +1,18 @@
+[Unit]
+Description=Systemd Service Supervisor Daemon
+After=network.target
+ConditionPathExists=/etc/systemd-supervisord/config.yaml
+
+[Service]
+Type=notify
+ExecStartPre=/usr/local/bin/systemd-supervisord check
+ExecStart=/usr/local/bin/systemd-supervisord run
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+WatchdogSec=30s
+NotifyAccess=main
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
