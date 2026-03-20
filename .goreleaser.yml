@@ -21,8 +21,7 @@ builds:
 nfpms:
   - id: systemd-supervisord
     package_name: systemd-supervisord
-    builds:
-      - systemd-supervisord
+    maintainer: vitalvas
     vendor: vitalvas
     homepage: https://github.com/vitalvas/systemd-supervisord
     description: Supervisor daemon for systemd services and timers
