@@ -154,7 +154,7 @@ func (m *DBusManager) WatchUnit(ctx context.Context, unit string, ch chan<- Stat
 		return fmt.Errorf("subscribing to D-Bus signals: %w", err)
 	}
 
-	evCh, errCh := m.conn.SubscribeUnitsCustomContext(ctx, 1, 0, func(u1, _ *dbus.UnitStatus) bool {
+	evCh, errCh := m.conn.SubscribeUnitsCustomContext(ctx, 1*time.Second, 0, func(u1, _ *dbus.UnitStatus) bool {
 		return u1.Name == unit
 	}, func(_ string) bool {
 		return true
@@ -163,31 +163,6 @@ func (m *DBusManager) WatchUnit(ctx context.Context, unit string, ch chan<- Stat
 	go processDBusEvents(ctx, evCh, errCh, ch)
 
 	return nil
-}
-
-func processDBusEvents(ctx context.Context, evCh <-chan map[string]*dbus.UnitStatus, errCh <-chan error, ch chan<- StateChange) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case units := <-evCh:
-			for name, status := range units {
-				if status == nil {
-					continue
-				}
-
-				ch <- StateChange{
-					UnitName:    name,
-					ActiveState: status.ActiveState,
-					SubState:    status.SubState,
-				}
-			}
-		case err := <-errCh:
-			if err != nil {
-				slog.Error("D-Bus subscription error", "error", err)
-			}
-		}
-	}
 }
 
 func (m *DBusManager) Close() error {

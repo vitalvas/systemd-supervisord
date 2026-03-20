@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"time"
 
 	"github.com/coreos/go-systemd/v22/activation"
 )
@@ -42,6 +43,8 @@ func (d *Daemon) ListenSocket(ctx context.Context) error {
 				}
 
 				slog.Error("accepting socket connection", "error", err)
+
+				time.Sleep(100 * time.Millisecond)
 
 				continue
 			}
