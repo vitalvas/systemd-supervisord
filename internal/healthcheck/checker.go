@@ -27,10 +27,10 @@ type Checker struct {
 	checks   []config.HealthCheck
 	resultCh chan<- Result
 
-	mu           sync.Mutex
-	failures     []int
-	lastErrors   []error
-	wasUnhealthy bool
+	mu          sync.Mutex
+	failures    []int
+	lastErrors  []error
+	lastHealthy *bool
 }
 
 func New(unitName string, checks []config.HealthCheck, resultCh chan<- Result) *Checker {
@@ -115,17 +115,17 @@ func (c *Checker) reportStatus() {
 		}
 	}
 
-	allHealthy := len(errs) == 0
+	healthy := len(errs) == 0
 
-	if allHealthy && c.wasUnhealthy {
-		c.wasUnhealthy = false
-		c.resultCh <- Result{UnitName: c.unitName, Healthy: true}
-
+	if c.lastHealthy != nil && *c.lastHealthy == healthy {
 		return
 	}
 
-	if !allHealthy && !c.wasUnhealthy {
-		c.wasUnhealthy = true
+	c.lastHealthy = &healthy
+
+	if healthy {
+		c.resultCh <- Result{UnitName: c.unitName, Healthy: true}
+	} else {
 		c.resultCh <- Result{UnitName: c.unitName, Healthy: false, Err: errors.Join(errs...)}
 	}
 }

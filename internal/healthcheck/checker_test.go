@@ -15,6 +15,18 @@ import (
 	"github.com/vitalvas/systemd-supervisord/internal/config"
 )
 
+func expectHealthy(t *testing.T, resultCh <-chan Result, unitName string) {
+	t.Helper()
+
+	select {
+	case r := <-resultCh:
+		assert.True(t, r.Healthy)
+		assert.Equal(t, unitName, r.UnitName)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for healthy result")
+	}
+}
+
 func acceptLoop(ln net.Listener) {
 	for {
 		conn, err := ln.Accept()
@@ -45,10 +57,7 @@ func TestChecker(t *testing.T) {
 
 		go c.Run(ctx)
 
-		<-ctx.Done()
-		time.Sleep(50 * time.Millisecond)
-
-		assert.Empty(t, resultCh)
+		expectHealthy(t, resultCh, "test.service")
 	})
 
 	t.Run("single tcp unhealthy", func(t *testing.T) {
@@ -90,10 +99,7 @@ func TestChecker(t *testing.T) {
 
 		go c.Run(ctx)
 
-		<-ctx.Done()
-		time.Sleep(50 * time.Millisecond)
-
-		assert.Empty(t, resultCh)
+		expectHealthy(t, resultCh, "web.service")
 	})
 
 	t.Run("http unhealthy status", func(t *testing.T) {
@@ -143,10 +149,7 @@ func TestChecker(t *testing.T) {
 
 		go c.Run(ctx)
 
-		<-ctx.Done()
-		time.Sleep(50 * time.Millisecond)
-
-		assert.Empty(t, resultCh)
+		expectHealthy(t, resultCh, "app.service")
 	})
 
 	t.Run("unix socket unhealthy", func(t *testing.T) {
@@ -196,10 +199,7 @@ func TestChecker(t *testing.T) {
 
 		go c.Run(ctx)
 
-		<-ctx.Done()
-		time.Sleep(50 * time.Millisecond)
-
-		assert.Empty(t, resultCh)
+		expectHealthy(t, resultCh, "multi.service")
 	})
 
 	t.Run("multiple endpoints one unhealthy", func(t *testing.T) {
@@ -212,22 +212,28 @@ func TestChecker(t *testing.T) {
 		resultCh := make(chan Result, 10)
 
 		c := New("multi.service", []config.HealthCheck{
-			{Type: "tcp", TCP: &config.TCPHealthCheck{Address: ln.Addr().String()}, Interval: 100 * time.Millisecond, Timeout: 100 * time.Millisecond, Retries: 1},
+			{Type: "tcp", TCP: &config.TCPHealthCheck{Address: ln.Addr().String()}, Interval: 100 * time.Millisecond, Timeout: 200 * time.Millisecond, Retries: 1},
 			{Type: "tcp", TCP: &config.TCPHealthCheck{Address: "127.0.0.1:1"}, Interval: 100 * time.Millisecond, Timeout: 100 * time.Millisecond, Retries: 1},
 		}, resultCh)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
 		go c.Run(ctx)
 
-		select {
-		case r := <-resultCh:
-			assert.False(t, r.Healthy)
-			assert.Equal(t, "multi.service", r.UnitName)
-			assert.Error(t, r.Err)
-		case <-ctx.Done():
-			t.Fatal("timed out waiting for unhealthy result")
+		var gotUnhealthy bool
+
+		for !gotUnhealthy {
+			select {
+			case r := <-resultCh:
+				if !r.Healthy {
+					gotUnhealthy = true
+					assert.Equal(t, "multi.service", r.UnitName)
+					assert.Error(t, r.Err)
+				}
+			case <-ctx.Done():
+				t.Fatal("timed out waiting for unhealthy result")
+			}
 		}
 	})
 
@@ -255,10 +261,7 @@ func TestChecker(t *testing.T) {
 
 		go c.Run(ctx)
 
-		<-ctx.Done()
-		time.Sleep(50 * time.Millisecond)
-
-		assert.Empty(t, resultCh)
+		expectHealthy(t, resultCh, "mixed.service")
 	})
 
 	t.Run("recovery emits healthy", func(t *testing.T) {
@@ -319,10 +322,7 @@ func TestCheckerAdvanced(t *testing.T) {
 
 		go c.Run(ctx)
 
-		<-ctx.Done()
-		time.Sleep(50 * time.Millisecond)
-
-		assert.Empty(t, resultCh)
+		expectHealthy(t, resultCh, "db.service")
 	})
 
 	t.Run("script unhealthy", func(t *testing.T) {
@@ -419,10 +419,7 @@ func TestCheckerAdvanced(t *testing.T) {
 			t.Fatal("timed out waiting for HTTP request")
 		}
 
-		<-ctx.Done()
-		time.Sleep(50 * time.Millisecond)
-
-		assert.Empty(t, resultCh)
+		expectHealthy(t, resultCh, "web.service")
 	})
 
 	t.Run("http expected status", func(t *testing.T) {
@@ -442,10 +439,7 @@ func TestCheckerAdvanced(t *testing.T) {
 
 		go c.Run(ctx)
 
-		<-ctx.Done()
-		time.Sleep(50 * time.Millisecond)
-
-		assert.Empty(t, resultCh)
+		expectHealthy(t, resultCh, "web.service")
 	})
 
 	t.Run("http expected status mismatch", func(t *testing.T) {
@@ -491,10 +485,7 @@ func TestCheckerAdvanced(t *testing.T) {
 
 		go c.Run(ctx)
 
-		<-ctx.Done()
-		time.Sleep(50 * time.Millisecond)
-
-		assert.Empty(t, resultCh)
+		expectHealthy(t, resultCh, "web.service")
 	})
 
 	t.Run("http response match failure", func(t *testing.T) {
@@ -562,10 +553,7 @@ func TestCheckerAdvanced(t *testing.T) {
 			t.Fatal("timed out waiting for HTTP request")
 		}
 
-		<-ctx.Done()
-		time.Sleep(50 * time.Millisecond)
-
-		assert.Empty(t, resultCh)
+		expectHealthy(t, resultCh, "web.service")
 	})
 
 	t.Run("empty checks returns immediately", func(t *testing.T) {
@@ -602,12 +590,28 @@ func TestCheckerAdvanced(t *testing.T) {
 
 		go c.Run(ctx)
 
+		// First result: initial healthy (check[0] passes before check[1] exhausts retries)
+		expectHealthy(t, resultCh, "multi.service")
+
+		// Second result: unhealthy after check[1] fails 3 times
 		select {
 		case r := <-resultCh:
 			assert.False(t, r.Healthy)
 			assert.Equal(t, "multi.service", r.UnitName)
 		case <-ctx.Done():
-			t.Fatal("timed out: second check with retries=3 should have triggered unhealthy")
+			t.Fatal("timed out waiting for unhealthy result")
 		}
+	})
+
+	t.Run("unknown health check type", func(t *testing.T) {
+		err := checkEndpoint(context.Background(), &config.HealthCheck{Type: "grpc"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown health check type: grpc")
+	})
+
+	t.Run("http invalid address", func(t *testing.T) {
+		err := checkHTTP(context.Background(), time.Second, &config.HTTPHealthCheck{Address: "://invalid"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "creating request")
 	})
 }
