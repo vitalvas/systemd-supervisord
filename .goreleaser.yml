@@ -18,6 +18,24 @@ builds:
       - -X main.version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
+nfpms:
+  - id: systemd-supervisord
+    package_name: systemd-supervisord
+    builds:
+      - systemd-supervisord
+    vendor: vitalvas
+    homepage: https://github.com/vitalvas/systemd-supervisord
+    description: Supervisor daemon for systemd services and timers
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    contents:
+      - src: misc/systemd-supervisord.service
+        dst: /lib/systemd/system/systemd-supervisord.service
+    scripts:
+      postinstall: misc/postinstall.sh
 checksum:
   name_template: checksums.txt
   algorithm: sha256

@@ -5,8 +5,8 @@ ConditionPathExists=/etc/systemd-supervisord/config.yaml
 
 [Service]
 Type=notify
-ExecStartPre=/usr/local/bin/systemd-supervisord check
-ExecStart=/usr/local/bin/systemd-supervisord run
+ExecStartPre=/usr/bin/systemd-supervisord check
+ExecStart=/usr/bin/systemd-supervisord run
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5s

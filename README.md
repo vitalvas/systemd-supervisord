@@ -16,25 +16,9 @@ A supervisor daemon for systemd services and timers. It monitors unit health, au
 - **Systemd Integration** -- sd_notify protocol support with watchdog, D-Bus API with systemctl fallback
 - **CLI Control** -- List, status, start, stop, and restart units via Unix socket IPC
 
-## Installation
-
-Build from source:
-
-```sh
-go build -o systemd-supervisord .
-sudo cp systemd-supervisord /usr/local/bin/
-```
-
-Install the systemd service:
-
-```sh
-sudo cp dist/systemd-supervisord.service /etc/systemd/system/
-sudo systemctl daemon-reload
-```
-
 ## Configuration
 
-Create the configuration file at `/etc/systemd-supervisord/config.yaml`. See [dist/config.example.yaml](dist/config.example.yaml) for a full example.
+Create the configuration file at `/etc/systemd-supervisord/config.yaml`.
 
 ### Top-level options
 
