@@ -1,0 +1,9 @@
+[Unit]
+Description=Systemd Service Supervisor Daemon Socket
+
+[Socket]
+ListenStream=/var/run/systemd-supervisord.sock
+SocketMode=0660
+
+[Install]
+WantedBy=sockets.target

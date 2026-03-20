@@ -1,5 +1,6 @@
 #!/bin/sh
 systemctl daemon-reload
+systemctl enable --now systemd-supervisord.socket
 systemctl enable systemd-supervisord.service
 
 if systemctl is-enabled --quiet systemd-supervisord.service; then

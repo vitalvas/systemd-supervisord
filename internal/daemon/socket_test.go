@@ -259,6 +259,50 @@ func shortSocketPath(t *testing.T) string {
 	return path
 }
 
+func TestCreateListener(t *testing.T) {
+	t.Run("creates unix socket with correct permissions", func(t *testing.T) {
+		socketPath := shortSocketPath(t)
+
+		mgr := newMockManager()
+		cfg := &config.Config{Socket: socketPath}
+		d := newTestDaemon(mgr, cfg)
+
+		ln, err := d.createListener()
+		require.NoError(t, err)
+		defer ln.Close()
+
+		info, statErr := os.Stat(socketPath)
+		require.NoError(t, statErr)
+		assert.Equal(t, os.FileMode(0o660), info.Mode().Perm())
+	})
+
+	t.Run("fails for invalid path", func(t *testing.T) {
+		mgr := newMockManager()
+		cfg := &config.Config{Socket: "/nonexistent/deeply/nested/path/test.sock"}
+		d := newTestDaemon(mgr, cfg)
+
+		_, err := d.createListener()
+		assert.Error(t, err)
+	})
+}
+
+func TestAcquireListener(t *testing.T) {
+	t.Run("falls back to create listener without socket activation", func(t *testing.T) {
+		socketPath := shortSocketPath(t)
+
+		mgr := newMockManager()
+		cfg := &config.Config{Socket: socketPath}
+		d := newTestDaemon(mgr, cfg)
+
+		ln, err := d.acquireListener()
+		require.NoError(t, err)
+		defer ln.Close()
+
+		_, statErr := os.Stat(socketPath)
+		require.NoError(t, statErr)
+	})
+}
+
 func TestListenSocket(t *testing.T) {
 	t.Run("creates socket and accepts connections", func(t *testing.T) {
 		socketPath := shortSocketPath(t)

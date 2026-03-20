@@ -486,6 +486,29 @@ Scripts and exec actions receive the following environment variables:
 | `SUPERVISORD_HEALTHY`       | Health status: `true` or `false`. Not set if unit has no health checks. |
 | `SUPERVISORD_TIMESTAMP`     | Event timestamp in RFC 3339 format.                          |
 
+## Socket Activation
+
+systemd-supervisord ships with a systemd socket unit (`systemd-supervisord.socket`) that is installed to `/lib/systemd/system/`. When enabled, systemd creates and manages the socket, passing it to the daemon on startup. This enables on-demand startup and zero-downtime restarts.
+
+### How It Works
+
+On startup, the daemon checks for file descriptors passed by systemd via the `LISTEN_FDS` and `LISTEN_PID` environment variables. If a socket is available, the daemon uses it directly. If no systemd-provided socket is detected, the daemon falls back to creating the socket manually using the `socket` path from the configuration.
+
+### Usage
+
+Enable the socket unit:
+
+```sh
+systemctl enable --now systemd-supervisord.socket
+systemctl start systemd-supervisord.service
+```
+
+The socket listens on `/var/run/systemd-supervisord.sock` with mode `0660`.
+
+### Manual Socket Creation
+
+If the socket unit is not enabled, the daemon creates the Unix socket at the path specified by the `socket` config option, removes any existing file at that path, and sets permissions to `0660`.
+
 ## Duration Format
 
 All duration fields use Go duration syntax: `5s`, `10m`, `1h30m`, `500ms`.

@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net"
 	"os"
+
+	"github.com/coreos/go-systemd/v22/activation"
 )
 
 type Request struct {
@@ -21,21 +23,9 @@ type Response struct {
 }
 
 func (d *Daemon) ListenSocket(ctx context.Context) error {
-	socketPath := d.cfg.Socket
-
-	if err := os.RemoveAll(socketPath); err != nil {
-		return fmt.Errorf("removing existing socket: %w", err)
-	}
-
-	ln, err := net.Listen("unix", socketPath)
+	ln, err := d.acquireListener()
 	if err != nil {
-		return fmt.Errorf("listening on socket %s: %w", socketPath, err)
-	}
-
-	if err := os.Chmod(socketPath, 0o660); err != nil {
-		ln.Close()
-
-		return fmt.Errorf("setting socket permissions: %w", err)
+		return err
 	}
 
 	go func() {
@@ -60,9 +50,45 @@ func (d *Daemon) ListenSocket(ctx context.Context) error {
 		}
 	}()
 
+	return nil
+}
+
+func (d *Daemon) acquireListener() (net.Listener, error) {
+	listeners, err := activation.Listeners()
+	if err != nil {
+		return nil, fmt.Errorf("checking socket activation: %w", err)
+	}
+
+	if len(listeners) > 0 {
+		slog.Info("using socket activation", "count", len(listeners))
+
+		return listeners[0], nil
+	}
+
+	return d.createListener()
+}
+
+func (d *Daemon) createListener() (net.Listener, error) {
+	socketPath := d.cfg.Socket
+
+	if err := os.RemoveAll(socketPath); err != nil {
+		return nil, fmt.Errorf("removing existing socket: %w", err)
+	}
+
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return nil, fmt.Errorf("listening on socket %s: %w", socketPath, err)
+	}
+
+	if err := os.Chmod(socketPath, 0o660); err != nil {
+		ln.Close()
+
+		return nil, fmt.Errorf("setting socket permissions: %w", err)
+	}
+
 	slog.Info("socket listener started", "path", socketPath)
 
-	return nil
+	return ln, nil
 }
 
 func (d *Daemon) handleConnection(ctx context.Context, conn net.Conn) {

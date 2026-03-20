@@ -1,6 +1,7 @@
 [Unit]
 Description=Systemd Service Supervisor Daemon
-After=network.target
+Requires=systemd-supervisord.socket
+After=network.target systemd-supervisord.socket
 ConditionPathExists=/etc/systemd-supervisord/config.yaml
 
 [Service]
