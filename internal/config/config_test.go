@@ -802,6 +802,97 @@ units:
 		assert.ElementsMatch(t, []string{"app", "worker"}, deps)
 	})
 
+	t.Run("qualified dependency on different type", func(t *testing.T) {
+		content := `
+units:
+  - name: backup
+    type: service
+  - name: backup
+    type: timer
+  - name: app
+    type: service
+    depends_on:
+      - backup.timer
+`
+		cfg := loadFromString(t, content)
+		assert.Equal(t, []string{"backup.timer"}, cfg.Units[2].DependsOn)
+	})
+
+	t.Run("qualified dependency on unknown unit rejected", func(t *testing.T) {
+		content := `
+units:
+  - name: app
+    type: service
+    depends_on:
+      - missing.timer
+`
+		_, err := loadStringConfig(content)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown unit")
+	})
+
+	t.Run("qualified dependency circular rejected", func(t *testing.T) {
+		content := `
+units:
+  - name: a
+    type: service
+    depends_on:
+      - b.service
+  - name: b
+    type: service
+    depends_on:
+      - a
+`
+		_, err := loadStringConfig(content)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "circular dependency")
+	})
+
+	t.Run("qualified dependency order", func(t *testing.T) {
+		content := `
+units:
+  - name: app
+    type: service
+    depends_on:
+      - db.service
+  - name: db
+    type: service
+`
+		cfg := loadFromString(t, content)
+		order := cfg.DependencyOrder()
+
+		dbIdx := -1
+		appIdx := -1
+
+		for i, name := range order {
+			switch name {
+			case "db":
+				dbIdx = i
+			case "app":
+				appIdx = i
+			}
+		}
+
+		assert.Greater(t, appIdx, dbIdx)
+	})
+
+	t.Run("qualified dependents lookup", func(t *testing.T) {
+		content := `
+units:
+  - name: backup
+    type: service
+  - name: backup
+    type: timer
+  - name: app
+    type: service
+    depends_on:
+      - backup.timer
+`
+		cfg := loadFromString(t, content)
+		deps := cfg.Dependents("backup")
+		assert.Contains(t, deps, "app")
+	})
+
 	t.Run("no dependents", func(t *testing.T) {
 		content := `
 units:

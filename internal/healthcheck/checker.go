@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vitalvas/systemd-supervisord/internal/config"
@@ -24,15 +25,21 @@ type Result struct {
 type Checker struct {
 	unitName string
 	checks   []config.HealthCheck
-	failCnt  int
 	resultCh chan<- Result
+
+	mu           sync.Mutex
+	failures     []int
+	lastErrors   []error
+	wasUnhealthy bool
 }
 
 func New(unitName string, checks []config.HealthCheck, resultCh chan<- Result) *Checker {
 	return &Checker{
-		unitName: unitName,
-		checks:   checks,
-		resultCh: resultCh,
+		unitName:   unitName,
+		checks:     checks,
+		failures:   make([]int, len(checks)),
+		lastErrors: make([]error, len(checks)),
+		resultCh:   resultCh,
 	}
 }
 
@@ -41,10 +48,24 @@ func (c *Checker) Run(ctx context.Context) {
 		return
 	}
 
-	interval := c.checks[0].Interval
-	retries := c.checks[0].Retries
+	var wg sync.WaitGroup
 
-	ticker := time.NewTicker(interval)
+	for i := range c.checks {
+		wg.Add(1)
+
+		go func(idx int) {
+			defer wg.Done()
+
+			c.runCheck(ctx, idx)
+		}(i)
+	}
+
+	wg.Wait()
+}
+
+func (c *Checker) runCheck(ctx context.Context, idx int) {
+	check := &c.checks[idx]
+	ticker := time.NewTicker(check.Interval)
 	defer ticker.Stop()
 
 	for {
@@ -52,40 +73,61 @@ func (c *Checker) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			err := c.checkAll(ctx)
+			err := checkEndpoint(ctx, check)
 			if err != nil {
-				c.failCnt++
+				c.mu.Lock()
+				c.failures[idx]++
+				c.lastErrors[idx] = err
+				failures := c.failures[idx]
+				c.mu.Unlock()
 
 				slog.Warn("health check failed",
 					"unit", c.unitName,
-					"consecutive_failures", c.failCnt,
+					"check_index", idx,
+					"consecutive_failures", failures,
 					"error", err,
 				)
 
-				if c.failCnt >= retries {
-					c.resultCh <- Result{UnitName: c.unitName, Healthy: false, Err: err}
+				if failures >= check.Retries {
+					c.reportStatus()
 				}
 			} else {
-				if c.failCnt >= retries {
-					c.resultCh <- Result{UnitName: c.unitName, Healthy: true}
-				}
+				c.mu.Lock()
+				c.failures[idx] = 0
+				c.lastErrors[idx] = nil
+				c.mu.Unlock()
 
-				c.failCnt = 0
+				c.reportStatus()
 			}
 		}
 	}
 }
 
-func (c *Checker) checkAll(ctx context.Context) error {
+func (c *Checker) reportStatus() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	var errs []error
 
-	for i := range c.checks {
-		if err := checkEndpoint(ctx, &c.checks[i]); err != nil {
-			errs = append(errs, err)
+	for i, check := range c.checks {
+		if c.failures[i] >= check.Retries {
+			errs = append(errs, c.lastErrors[i])
 		}
 	}
 
-	return errors.Join(errs...)
+	allHealthy := len(errs) == 0
+
+	if allHealthy && c.wasUnhealthy {
+		c.wasUnhealthy = false
+		c.resultCh <- Result{UnitName: c.unitName, Healthy: true}
+
+		return
+	}
+
+	if !allHealthy && !c.wasUnhealthy {
+		c.wasUnhealthy = true
+		c.resultCh <- Result{UnitName: c.unitName, Healthy: false, Err: errors.Join(errs...)}
+	}
 }
 
 func checkEndpoint(ctx context.Context, hc *config.HealthCheck) error {

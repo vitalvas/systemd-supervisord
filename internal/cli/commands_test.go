@@ -509,7 +509,7 @@ func TestSendUnitCommand(t *testing.T) {
 			return daemon.Response{Success: true}
 		})
 
-		err := sendUnitCommand(socketPath, "start", "nginx.service")
+		err := sendUnitCommand(os.Stdout, socketPath, "start", "nginx.service")
 		require.NoError(t, err)
 	})
 
@@ -518,13 +518,13 @@ func TestSendUnitCommand(t *testing.T) {
 			return daemon.Response{Success: false, Error: "unit not found"}
 		})
 
-		err := sendUnitCommand(socketPath, "start", "unknown.service")
+		err := sendUnitCommand(os.Stdout, socketPath, "start", "unknown.service")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unit not found")
 	})
 
 	t.Run("connection failure", func(t *testing.T) {
-		err := sendUnitCommand("/tmp/nonexistent-cli-test.sock", "start", "nginx.service")
+		err := sendUnitCommand(os.Stdout, "/tmp/nonexistent-cli-test.sock", "start", "nginx.service")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "connecting to daemon")
 	})

@@ -52,6 +52,13 @@ func (r *Restarter) Register(unitName string, policy config.RestartPolicy) {
 	}
 }
 
+func (r *Restarter) Unregister(unitName string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	delete(r.trackers, unitName)
+}
+
 func (r *Restarter) HandleEvent(ev statemanager.Event) {
 	if !r.shouldRestart(ev) {
 		return

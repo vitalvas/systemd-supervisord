@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vitalvas/systemd-supervisord/internal/config"
@@ -27,6 +28,7 @@ type EventPayload struct {
 }
 
 type Notifier struct {
+	mu        sync.RWMutex
 	variables map[string]string
 	webhooks  []config.WebhookConfig
 	scripts   []config.ScriptConfig
@@ -42,11 +44,28 @@ func New(cfg config.NotifyConfig) *Notifier {
 	}
 }
 
+func (n *Notifier) UpdateConfig(cfg config.NotifyConfig) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	n.variables = cfg.Variables
+	n.webhooks = cfg.Webhooks
+	n.scripts = cfg.Scripts
+	n.execs = cfg.Execs
+}
+
 func (n *Notifier) HandleEvent(ev statemanager.Event) {
+	n.mu.RLock()
+	variables := n.variables
+	webhooks := n.webhooks
+	scripts := n.scripts
+	execs := n.execs
+	n.mu.RUnlock()
+
 	payload := EventPayload{
 		UnitName:  ev.UnitName,
 		Timestamp: ev.Timestamp.UTC().Format(time.RFC3339),
-		Variables: n.variables,
+		Variables: variables,
 	}
 
 	switch ev.Type {
@@ -59,19 +78,19 @@ func (n *Notifier) HandleEvent(ev statemanager.Event) {
 		payload.Healthy = ev.Healthy
 	}
 
-	for _, wh := range n.webhooks {
+	for _, wh := range webhooks {
 		if matchesFilter(wh.Events, payload.EventType) {
 			go n.sendWebhook(wh, payload)
 		}
 	}
 
-	for _, sc := range n.scripts {
+	for _, sc := range scripts {
 		if matchesFilter(sc.Events, payload.EventType) {
 			go n.runScript(sc, payload)
 		}
 	}
 
-	for _, ec := range n.execs {
+	for _, ec := range execs {
 		if matchesFilter(ec.Events, payload.EventType) {
 			go n.runExec(ec, payload)
 		}

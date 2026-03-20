@@ -100,7 +100,12 @@ type ScriptConfig struct {
 func (c *Config) DependencyOrder() []string {
 	deps := make(map[string][]string, len(c.Units))
 	for _, u := range c.Units {
-		deps[u.Name] = u.DependsOn
+		bareDeps := make([]string, len(u.DependsOn))
+		for i, dep := range u.DependsOn {
+			bareDeps[i] = depBareName(dep)
+		}
+
+		deps[u.Name] = bareDeps
 	}
 
 	visited := make(map[string]bool, len(c.Units))
@@ -133,7 +138,7 @@ func (c *Config) Dependents(unitName string) []string {
 
 	for _, u := range c.Units {
 		for _, dep := range u.DependsOn {
-			if dep == unitName {
+			if dep == unitName || depBareName(dep) == unitName {
 				result = append(result, u.Name)
 
 				break
@@ -351,16 +356,29 @@ func validateInstancePattern(u *UnitConfig) error {
 	return nil
 }
 
+func isQualifiedDep(dep string) bool {
+	return strings.HasSuffix(dep, ".service") || strings.HasSuffix(dep, ".timer")
+}
+
 func validateDependencies(units []UnitConfig) error {
-	names := make(map[string]struct{}, len(units))
+	bareNames := make(map[string]struct{}, len(units))
+	qualifiedNames := make(map[string]struct{}, len(units))
+
 	for _, u := range units {
-		names[u.Name] = struct{}{}
+		bareNames[u.Name] = struct{}{}
+		qualifiedNames[u.UnitName()] = struct{}{}
 	}
 
 	for _, u := range units {
 		for _, dep := range u.DependsOn {
-			if _, ok := names[dep]; !ok {
-				return fmt.Errorf("unit %q depends on unknown unit %q", u.Name, dep)
+			if isQualifiedDep(dep) {
+				if _, ok := qualifiedNames[dep]; !ok {
+					return fmt.Errorf("unit %q depends on unknown unit %q", u.UnitName(), dep)
+				}
+			} else {
+				if _, ok := bareNames[dep]; !ok {
+					return fmt.Errorf("unit %q depends on unknown unit %q", u.Name, dep)
+				}
 			}
 		}
 	}
@@ -368,10 +386,23 @@ func validateDependencies(units []UnitConfig) error {
 	return detectCycle(units)
 }
 
+func depBareName(dep string) string {
+	if isQualifiedDep(dep) {
+		return strings.TrimSuffix(strings.TrimSuffix(dep, ".service"), ".timer")
+	}
+
+	return dep
+}
+
 func detectCycle(units []UnitConfig) error {
 	deps := make(map[string][]string, len(units))
 	for _, u := range units {
-		deps[u.Name] = u.DependsOn
+		bareDeps := make([]string, len(u.DependsOn))
+		for i, dep := range u.DependsOn {
+			bareDeps[i] = depBareName(dep)
+		}
+
+		deps[u.Name] = bareDeps
 	}
 
 	const (

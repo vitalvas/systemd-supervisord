@@ -741,3 +741,21 @@ func TestNotifierExec(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	})
 }
+
+func TestUpdateConfig(t *testing.T) {
+	t.Run("updates notification config", func(t *testing.T) {
+		n := New(config.NotifyConfig{
+			Variables: map[string]string{"env": "prod"},
+		})
+
+		newCfg := config.NotifyConfig{
+			Variables: map[string]string{"env": "staging"},
+		}
+
+		n.UpdateConfig(newCfg)
+
+		n.mu.RLock()
+		assert.Equal(t, "staging", n.variables["env"])
+		n.mu.RUnlock()
+	})
+}

@@ -14,6 +14,57 @@ import (
 	"github.com/vitalvas/systemd-supervisord/internal/config"
 )
 
+func TestRemoveStaleSocket(t *testing.T) {
+	t.Run("no-op when path does not exist", func(t *testing.T) {
+		err := removeStaleSocket(fmt.Sprintf("/tmp/nonexistent-socket-path-%d", time.Now().UnixNano()))
+		assert.NoError(t, err)
+	})
+
+	t.Run("removes existing unix socket", func(t *testing.T) {
+		socketPath := shortSocketPath(t)
+
+		ln, err := net.Listen("unix", socketPath)
+		require.NoError(t, err)
+
+		// Keep listener open so the socket file exists.
+		defer ln.Close()
+
+		_, statErr := os.Stat(socketPath)
+		require.NoError(t, statErr)
+
+		err = removeStaleSocket(socketPath)
+		assert.NoError(t, err)
+
+		_, statErr = os.Stat(socketPath)
+		assert.True(t, os.IsNotExist(statErr))
+	})
+
+	t.Run("rejects directory path", func(t *testing.T) {
+		dir := t.TempDir()
+
+		err := removeStaleSocket(dir)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "directory")
+
+		_, statErr := os.Stat(dir)
+		assert.NoError(t, statErr)
+	})
+
+	t.Run("rejects regular file", func(t *testing.T) {
+		f, err := os.CreateTemp("", "not-a-socket-*")
+		require.NoError(t, err)
+		f.Close()
+		defer os.Remove(f.Name())
+
+		err = removeStaleSocket(f.Name())
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not a unix socket")
+
+		_, statErr := os.Stat(f.Name())
+		assert.NoError(t, statErr)
+	})
+}
+
 func TestProcessRequest(t *testing.T) {
 	t.Run("list registered units", func(t *testing.T) {
 		mgr := newMockManager()
@@ -363,8 +414,9 @@ func TestListenSocket(t *testing.T) {
 	t.Run("removes existing socket before listening", func(t *testing.T) {
 		socketPath := shortSocketPath(t)
 
-		err := os.WriteFile(socketPath, []byte("old"), 0o600)
+		oldLn, err := net.Listen("unix", socketPath)
 		require.NoError(t, err)
+		oldLn.Close()
 
 		mgr := newMockManager()
 		cfg := &config.Config{
@@ -380,7 +432,7 @@ func TestListenSocket(t *testing.T) {
 
 		info, statErr := os.Stat(socketPath)
 		require.NoError(t, statErr)
-		assert.NotEqual(t, os.ModeSocket, info.Mode()&os.ModeSocket^os.ModeSocket)
+		assert.NotZero(t, info.Mode()&os.ModeSocket)
 	})
 
 	t.Run("fails when socket path is invalid", func(t *testing.T) {

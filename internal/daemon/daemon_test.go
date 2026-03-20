@@ -154,14 +154,17 @@ func newTestDaemon(mgr systemd.Manager, cfg *config.Config) *Daemon {
 	sm.OnEvent(rest.HandleEvent)
 
 	return &Daemon{
-		cfg:             cfg,
-		mgr:             mgr,
-		sm:              sm,
-		notifier:        notif,
-		restarter:       rest,
-		changeCh:        make(chan systemd.StateChange, 100),
-		healthCh:        make(chan healthcheck.Result, 100),
-		registeredUnits: make(map[string]struct{}),
+		cfg:               cfg,
+		mgr:               mgr,
+		sm:                sm,
+		notifier:          notif,
+		restarter:         rest,
+		changeCh:          make(chan systemd.StateChange, 100),
+		healthCh:          make(chan healthcheck.Result, 100),
+		registeredUnits:   make(map[string]struct{}),
+		unitCancels:       make(map[string]context.CancelFunc),
+		discoveryReloadCh: make(chan struct{}, 1),
+		timerReloadCh:     make(chan struct{}, 1),
 	}
 }
 
@@ -225,6 +228,42 @@ func TestSetupLogging(t *testing.T) {
 
 	t.Run("empty string defaults to info", func(_ *testing.T) {
 		setupLogging("")
+	})
+}
+
+func TestBuildDependents(t *testing.T) {
+	t.Run("bare dependency uses dependent type", func(t *testing.T) {
+		units := []config.UnitConfig{
+			{Name: "db", Type: "service"},
+			{Name: "app", Type: "service", DependsOn: []string{"db"}},
+		}
+
+		deps := buildDependents(units)
+		assert.Equal(t, []string{"app.service"}, deps["db.service"])
+	})
+
+	t.Run("qualified dependency uses explicit type", func(t *testing.T) {
+		units := []config.UnitConfig{
+			{Name: "backup", Type: "service"},
+			{Name: "backup", Type: "timer"},
+			{Name: "app", Type: "service", DependsOn: []string{"backup.timer"}},
+		}
+
+		deps := buildDependents(units)
+		assert.Equal(t, []string{"app.service"}, deps["backup.timer"])
+		assert.Empty(t, deps["backup.service"])
+	})
+
+	t.Run("mixed bare and qualified", func(t *testing.T) {
+		units := []config.UnitConfig{
+			{Name: "db", Type: "service"},
+			{Name: "cache", Type: "service"},
+			{Name: "app", Type: "service", DependsOn: []string{"db", "cache.service"}},
+		}
+
+		deps := buildDependents(units)
+		assert.Equal(t, []string{"app.service"}, deps["db.service"])
+		assert.Equal(t, []string{"app.service"}, deps["cache.service"])
 	})
 }
 
@@ -824,6 +863,7 @@ func TestEventLoop(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
+		d.ctx = ctx
 		d.cancel = cancel
 
 		done := make(chan error, 1)
@@ -860,20 +900,20 @@ func TestEventLoop(t *testing.T) {
 
 func TestNew(t *testing.T) {
 	t.Run("returns daemon with correct configPath", func(t *testing.T) {
-		d := New("/etc/test/config.yaml")
+		d := New("/etc/test/config.yaml", false)
 
 		assert.Equal(t, "/etc/test/config.yaml", d.configPath)
 	})
 
 	t.Run("initializes registeredUnits map", func(t *testing.T) {
-		d := New("/etc/test/config.yaml")
+		d := New("/etc/test/config.yaml", false)
 
 		assert.NotNil(t, d.registeredUnits)
 		assert.Empty(t, d.registeredUnits)
 	})
 
 	t.Run("other fields are zero values", func(t *testing.T) {
-		d := New("/some/path.yaml")
+		d := New("/some/path.yaml", false)
 
 		assert.Nil(t, d.cfg)
 		assert.Nil(t, d.mgr)
@@ -885,11 +925,17 @@ func TestNew(t *testing.T) {
 		assert.Nil(t, d.changeCh)
 		assert.Nil(t, d.healthCh)
 	})
+
+	t.Run("sets dry-run flag", func(t *testing.T) {
+		d := New("/etc/test/config.yaml", true)
+
+		assert.True(t, d.dryRun)
+	})
 }
 
 func TestRun(t *testing.T) {
 	t.Run("returns error for nonexistent config", func(t *testing.T) {
-		d := New("/nonexistent/config.yaml")
+		d := New("/nonexistent/config.yaml", false)
 
 		err := d.Run(context.Background())
 		require.Error(t, err)
@@ -905,7 +951,7 @@ func TestRun(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, tmpFile.Close())
 
-		d := New(tmpFile.Name())
+		d := New(tmpFile.Name(), false)
 
 		err = d.Run(context.Background())
 		require.Error(t, err)
@@ -927,7 +973,7 @@ units:
 		require.NoError(t, err)
 		require.NoError(t, tmpFile.Close())
 
-		d := New(tmpFile.Name())
+		d := New(tmpFile.Name(), false)
 
 		err = d.Run(context.Background())
 		require.Error(t, err)
@@ -943,7 +989,7 @@ units:
 		require.NoError(t, err)
 		require.NoError(t, tmpFile.Close())
 
-		d := New(tmpFile.Name())
+		d := New(tmpFile.Name(), false)
 
 		err = d.Run(context.Background())
 		require.Error(t, err)
@@ -974,6 +1020,7 @@ func TestReload(t *testing.T) {
 		}
 		d := newTestDaemon(mgr, cfg)
 		d.configPath = tmpFile.Name()
+		d.ctx = context.Background()
 		d.sdNotifier = systemd.NewNotifier(func() string { return "test" })
 
 		d.reload()
@@ -1045,6 +1092,319 @@ func TestReload(t *testing.T) {
 		d.reload()
 
 		assert.Equal(t, "original", d.cfg.Units[0].Name)
+	})
+
+	t.Run("reload registers new units", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp("", "test-config-*.yaml")
+		require.NoError(t, err)
+		defer os.Remove(tmpFile.Name())
+
+		configData := `units:
+  - name: old
+    type: service
+  - name: new
+    type: service
+`
+		_, err = tmpFile.WriteString(configData)
+		require.NoError(t, err)
+		require.NoError(t, tmpFile.Close())
+
+		mgr := newMockManager()
+		cfg := &config.Config{
+			Units: []config.UnitConfig{
+				{Name: "old", Type: "service"},
+			},
+		}
+		d := newTestDaemon(mgr, cfg)
+		d.configPath = tmpFile.Name()
+		d.ctx = context.Background()
+		d.sdNotifier = systemd.NewNotifier(func() string { return "test" })
+
+		d.registerUnit(context.Background(), "old.service", &cfg.Units[0])
+
+		d.reload()
+
+		d.mu.Lock()
+		_, hasOld := d.registeredUnits["old.service"]
+		_, hasNew := d.registeredUnits["new.service"]
+		d.mu.Unlock()
+
+		assert.True(t, hasOld)
+		assert.True(t, hasNew)
+	})
+
+	t.Run("reload unregisters removed units", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp("", "test-config-*.yaml")
+		require.NoError(t, err)
+		defer os.Remove(tmpFile.Name())
+
+		configData := `units:
+  - name: kept
+    type: service
+`
+		_, err = tmpFile.WriteString(configData)
+		require.NoError(t, err)
+		require.NoError(t, tmpFile.Close())
+
+		mgr := newMockManager()
+		cfg := &config.Config{
+			Units: []config.UnitConfig{
+				{Name: "kept", Type: "service"},
+				{Name: "removed", Type: "service"},
+			},
+		}
+		d := newTestDaemon(mgr, cfg)
+		d.configPath = tmpFile.Name()
+		d.ctx = context.Background()
+		d.sdNotifier = systemd.NewNotifier(func() string { return "test" })
+
+		d.registerUnit(context.Background(), "kept.service", &cfg.Units[0])
+		d.registerUnit(context.Background(), "removed.service", &cfg.Units[1])
+
+		d.reload()
+
+		d.mu.Lock()
+		_, hasKept := d.registeredUnits["kept.service"]
+		_, hasRemoved := d.registeredUnits["removed.service"]
+		d.mu.Unlock()
+
+		assert.True(t, hasKept)
+		assert.False(t, hasRemoved)
+	})
+
+	t.Run("reload preserves template instances", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp("", "test-config-*.yaml")
+		require.NoError(t, err)
+		defer os.Remove(tmpFile.Name())
+
+		configData := `units:
+  - name: "worker@"
+    type: service
+`
+		_, err = tmpFile.WriteString(configData)
+		require.NoError(t, err)
+		require.NoError(t, tmpFile.Close())
+
+		mgr := newMockManager()
+		mgr.listResult = map[string][]string{
+			"worker@": {"worker@a.service", "worker@b.service"},
+		}
+
+		oldCfg, loadErr := config.Load(tmpFile.Name())
+		require.NoError(t, loadErr)
+
+		d := newTestDaemon(mgr, oldCfg)
+		d.configPath = tmpFile.Name()
+		d.ctx = context.Background()
+		d.sdNotifier = systemd.NewNotifier(func() string { return "test" })
+
+		d.registerUnit(context.Background(), "worker@a.service", &oldCfg.Units[0])
+		d.registerUnit(context.Background(), "worker@b.service", &oldCfg.Units[0])
+
+		d.reload()
+
+		d.mu.Lock()
+		_, hasA := d.registeredUnits["worker@a.service"]
+		_, hasB := d.registeredUnits["worker@b.service"]
+		d.mu.Unlock()
+
+		assert.True(t, hasA)
+		assert.True(t, hasB)
+	})
+
+	t.Run("reload starts discovery loop when template added", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp("", "test-config-*.yaml")
+		require.NoError(t, err)
+		defer os.Remove(tmpFile.Name())
+
+		configData := `units:
+  - name: "worker@"
+    type: service
+`
+		_, err = tmpFile.WriteString(configData)
+		require.NoError(t, err)
+		require.NoError(t, tmpFile.Close())
+
+		mgr := newMockManager()
+		mgr.listResult = map[string][]string{
+			"worker@": {"worker@a.service"},
+		}
+
+		cfg := &config.Config{
+			Units: []config.UnitConfig{
+				{Name: "plain", Type: "service"},
+			},
+		}
+		d := newTestDaemon(mgr, cfg)
+		d.configPath = tmpFile.Name()
+		d.ctx = context.Background()
+		d.sdNotifier = systemd.NewNotifier(func() string { return "test" })
+
+		assert.False(t, d.discoveryRunning)
+
+		d.reload()
+
+		assert.True(t, d.discoveryRunning)
+	})
+
+	t.Run("reload starts timer loop when timer with max_delay added", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp("", "test-config-*.yaml")
+		require.NoError(t, err)
+		defer os.Remove(tmpFile.Name())
+
+		configData := `units:
+  - name: backup
+    type: timer
+    max_delay: 1h
+`
+		_, err = tmpFile.WriteString(configData)
+		require.NoError(t, err)
+		require.NoError(t, tmpFile.Close())
+
+		mgr := newMockManager()
+
+		cfg := &config.Config{
+			Units: []config.UnitConfig{
+				{Name: "plain", Type: "service"},
+			},
+		}
+		d := newTestDaemon(mgr, cfg)
+		d.configPath = tmpFile.Name()
+		d.ctx = context.Background()
+		d.sdNotifier = systemd.NewNotifier(func() string { return "test" })
+
+		assert.False(t, d.timerRunning)
+
+		d.reload()
+
+		assert.True(t, d.timerRunning)
+	})
+
+	t.Run("reload re-registers existing units to update config", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp("", "test-config-*.yaml")
+		require.NoError(t, err)
+		defer os.Remove(tmpFile.Name())
+
+		configData := `units:
+  - name: app
+    type: service
+`
+		_, err = tmpFile.WriteString(configData)
+		require.NoError(t, err)
+		require.NoError(t, tmpFile.Close())
+
+		mgr := newMockManager()
+		cfg := &config.Config{
+			Units: []config.UnitConfig{
+				{Name: "app", Type: "service"},
+			},
+		}
+		d := newTestDaemon(mgr, cfg)
+		d.configPath = tmpFile.Name()
+		d.ctx = context.Background()
+		d.sdNotifier = systemd.NewNotifier(func() string { return "test" })
+
+		d.registerUnit(context.Background(), "app.service", &cfg.Units[0])
+
+		d.reload()
+
+		d.mu.Lock()
+		_, hasApp := d.registeredUnits["app.service"]
+		d.mu.Unlock()
+
+		assert.True(t, hasApp)
+	})
+}
+
+func TestFindMatchingTemplate(t *testing.T) {
+	t.Run("matches bare template", func(t *testing.T) {
+		cfgData := `units:
+  - name: "worker@"
+    type: service
+`
+		tmpFile, err := os.CreateTemp("", "test-config-*.yaml")
+		require.NoError(t, err)
+		defer os.Remove(tmpFile.Name())
+
+		_, err = tmpFile.WriteString(cfgData)
+		require.NoError(t, err)
+		require.NoError(t, tmpFile.Close())
+
+		cfg, loadErr := config.Load(tmpFile.Name())
+		require.NoError(t, loadErr)
+
+		mgr := newMockManager()
+		d := newTestDaemon(mgr, cfg)
+
+		templates := []*config.UnitConfig{&cfg.Units[0]}
+
+		assert.NotNil(t, d.findMatchingTemplate("worker@a.service", templates))
+		assert.Nil(t, d.findMatchingTemplate("other@a.service", templates))
+	})
+
+	t.Run("matches pattern template", func(t *testing.T) {
+		cfgData := `units:
+  - name: "app@{web-[0-9]+}"
+    type: service
+`
+		tmpFile, err := os.CreateTemp("", "test-config-*.yaml")
+		require.NoError(t, err)
+		defer os.Remove(tmpFile.Name())
+
+		_, err = tmpFile.WriteString(cfgData)
+		require.NoError(t, err)
+		require.NoError(t, tmpFile.Close())
+
+		cfg, loadErr := config.Load(tmpFile.Name())
+		require.NoError(t, loadErr)
+
+		mgr := newMockManager()
+		d := newTestDaemon(mgr, cfg)
+
+		templates := []*config.UnitConfig{&cfg.Units[0]}
+
+		assert.NotNil(t, d.findMatchingTemplate("app@web-1.service", templates))
+		assert.Nil(t, d.findMatchingTemplate("app@db-1.service", templates))
+	})
+}
+
+func TestUnregisterUnit(t *testing.T) {
+	t.Run("unregisters existing unit", func(t *testing.T) {
+		mgr := newMockManager()
+		cfg := &config.Config{
+			Units: []config.UnitConfig{
+				{Name: "app", Type: "service"},
+			},
+		}
+		d := newTestDaemon(mgr, cfg)
+
+		d.registerUnit(context.Background(), "app.service", &cfg.Units[0])
+
+		d.mu.Lock()
+		_, exists := d.registeredUnits["app.service"]
+		d.mu.Unlock()
+		assert.True(t, exists)
+
+		d.unregisterUnit("app.service")
+
+		d.mu.Lock()
+		_, exists = d.registeredUnits["app.service"]
+		d.mu.Unlock()
+		assert.False(t, exists)
+
+		assert.Nil(t, d.sm.GetStatus("app.service"))
+	})
+
+	t.Run("no-op for unknown unit", func(t *testing.T) {
+		mgr := newMockManager()
+		cfg := &config.Config{}
+		d := newTestDaemon(mgr, cfg)
+
+		d.unregisterUnit("unknown.service")
+
+		d.mu.Lock()
+		assert.Empty(t, d.registeredUnits)
+		d.mu.Unlock()
 	})
 }
 

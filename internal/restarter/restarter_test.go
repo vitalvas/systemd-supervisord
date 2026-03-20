@@ -574,4 +574,25 @@ func TestRestarter(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 		assert.Empty(t, mock.restartCh)
 	})
+
+	t.Run("unregister removes tracker", func(t *testing.T) {
+		mock := &mockManager{restartCh: make(chan string, 10)}
+		sm := statemanager.New(100)
+		sm.Register("app.service")
+
+		r := New(mock, sm)
+		sm.OnEvent(r.HandleEvent)
+
+		r.Register("app.service", config.RestartPolicy{
+			Enabled: true,
+			Backoff: 0,
+		})
+
+		r.Unregister("app.service")
+
+		sm.UpdateState("app.service", "failed", "failed")
+
+		time.Sleep(200 * time.Millisecond)
+		assert.Empty(t, mock.restartCh)
+	})
 }

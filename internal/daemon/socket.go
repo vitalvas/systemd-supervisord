@@ -71,7 +71,7 @@ func (d *Daemon) acquireListener() (net.Listener, error) {
 func (d *Daemon) createListener() (net.Listener, error) {
 	socketPath := d.cfg.Socket
 
-	if err := os.RemoveAll(socketPath); err != nil {
+	if err := removeStaleSocket(socketPath); err != nil {
 		return nil, fmt.Errorf("removing existing socket: %w", err)
 	}
 
@@ -167,6 +167,27 @@ func (d *Daemon) processRequest(ctx context.Context, req Request) Response {
 	default:
 		return Response{Success: false, Error: fmt.Sprintf("unknown command: %s", req.Command)}
 	}
+}
+
+func removeStaleSocket(path string) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if info.IsDir() {
+		return fmt.Errorf("path is a directory: %s", path)
+	}
+
+	if info.Mode().Type()&os.ModeSocket == 0 {
+		return fmt.Errorf("path is not a unix socket: %s", path)
+	}
+
+	return os.Remove(path)
 }
 
 func writeResponse(conn net.Conn, resp Response) {

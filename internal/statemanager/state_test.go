@@ -3,6 +3,7 @@ package statemanager
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -146,5 +147,70 @@ func TestStateManager(t *testing.T) {
 		assert.Equal(t, 3, total)
 		assert.Equal(t, 1, healthy)
 		assert.Equal(t, 1, unhealthy)
+	})
+
+	t.Run("handler calling ResetRestartCount does not deadlock", func(t *testing.T) {
+		sm := New(10)
+		sm.Register("nginx.service")
+
+		done := make(chan struct{})
+
+		sm.OnEvent(func(ev Event) {
+			if ev.ActiveState == "active" {
+				sm.ResetRestartCount(ev.UnitName)
+			}
+		})
+
+		go func() {
+			sm.UpdateState("nginx.service", "active", "running")
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("deadlock detected: UpdateState did not return")
+		}
+	})
+
+	t.Run("handler calling IncrementRestartCount does not deadlock", func(t *testing.T) {
+		sm := New(10)
+		sm.Register("nginx.service")
+
+		done := make(chan struct{})
+
+		sm.OnEvent(func(ev Event) {
+			sm.IncrementRestartCount(ev.UnitName)
+		})
+
+		go func() {
+			sm.UpdateHealth("nginx.service", false)
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("deadlock detected: UpdateHealth did not return")
+		}
+	})
+
+	t.Run("unregister removes unit", func(t *testing.T) {
+		sm := New(10)
+		sm.Register("nginx.service")
+
+		assert.NotNil(t, sm.GetStatus("nginx.service"))
+
+		sm.Unregister("nginx.service")
+
+		assert.Nil(t, sm.GetStatus("nginx.service"))
+	})
+
+	t.Run("unregister unknown unit is no-op", func(t *testing.T) {
+		sm := New(10)
+
+		sm.Unregister("unknown.service")
+
+		assert.Nil(t, sm.GetStatus("unknown.service"))
 	})
 }

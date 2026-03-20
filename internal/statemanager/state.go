@@ -37,6 +37,13 @@ func (sm *StateManager) Register(unit string) {
 	}
 }
 
+func (sm *StateManager) Unregister(unit string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	delete(sm.units, unit)
+}
+
 func (sm *StateManager) OnEvent(handler func(Event)) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -46,14 +53,17 @@ func (sm *StateManager) OnEvent(handler func(Event)) {
 
 func (sm *StateManager) UpdateState(unit, activeState, subState string) {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
 
 	status, ok := sm.units[unit]
 	if !ok {
+		sm.mu.Unlock()
+
 		return
 	}
 
 	if status.ActiveState == activeState && status.SubState == subState {
+		sm.mu.Unlock()
+
 		return
 	}
 
@@ -69,19 +79,24 @@ func (sm *StateManager) UpdateState(unit, activeState, subState string) {
 		Timestamp:   status.LastTransition,
 	}
 
+	sm.mu.Unlock()
+
 	sm.emit(ev)
 }
 
 func (sm *StateManager) UpdateHealth(unit string, healthy bool) {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
 
 	status, ok := sm.units[unit]
 	if !ok {
+		sm.mu.Unlock()
+
 		return
 	}
 
 	if status.Healthy != nil && *status.Healthy == healthy {
+		sm.mu.Unlock()
+
 		return
 	}
 
@@ -93,6 +108,8 @@ func (sm *StateManager) UpdateHealth(unit string, healthy bool) {
 		Healthy:   &healthy,
 		Timestamp: time.Now(),
 	}
+
+	sm.mu.Unlock()
 
 	sm.emit(ev)
 }

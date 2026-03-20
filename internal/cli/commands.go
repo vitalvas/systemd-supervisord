@@ -39,12 +39,18 @@ func NewRootCommand() *cobra.Command {
 }
 
 func newRunCmd(configPath *string) *cobra.Command {
-	return &cobra.Command{
+	var dryRun bool
+
+	cmd := &cobra.Command{
 		Use: "run",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return daemon.New(*configPath).Run(cmd.Context())
+			return daemon.New(*configPath, dryRun).Run(cmd.Context())
 		},
 	}
+
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "run without performing any actions (start, stop, restart)")
+
+	return cmd
 }
 
 func newListCmd(socketPath *string) *cobra.Command {
@@ -97,8 +103,8 @@ func newStartCmd(socketPath *string) *cobra.Command {
 	return &cobra.Command{
 		Use:  "start <unit>",
 		Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return sendUnitCommand(*socketPath, "start", args[0])
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return sendUnitCommand(cmd.OutOrStdout(), *socketPath, "start", args[0])
 		},
 	}
 }
@@ -107,8 +113,8 @@ func newStopCmd(socketPath *string) *cobra.Command {
 	return &cobra.Command{
 		Use:  "stop <unit>",
 		Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return sendUnitCommand(*socketPath, "stop", args[0])
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return sendUnitCommand(cmd.OutOrStdout(), *socketPath, "stop", args[0])
 		},
 	}
 }
@@ -117,8 +123,8 @@ func newRestartCmd(socketPath *string) *cobra.Command {
 	return &cobra.Command{
 		Use:  "restart <unit>",
 		Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return sendUnitCommand(*socketPath, "restart", args[0])
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return sendUnitCommand(cmd.OutOrStdout(), *socketPath, "restart", args[0])
 		},
 	}
 }
@@ -139,7 +145,7 @@ func newCheckCmd(configPath *string) *cobra.Command {
 	}
 }
 
-func sendUnitCommand(socketPath, command, unitName string) error {
+func sendUnitCommand(w io.Writer, socketPath, command, unitName string) error {
 	resp, err := SendRequest(socketPath, daemon.Request{
 		Command:  command,
 		UnitName: unitName,
@@ -152,7 +158,7 @@ func sendUnitCommand(socketPath, command, unitName string) error {
 		return fmt.Errorf("%s", resp.Error)
 	}
 
-	fmt.Printf("%s: %s\n", command, unitName)
+	fmt.Fprintf(w, "%s: %s\n", command, unitName)
 
 	return nil
 }

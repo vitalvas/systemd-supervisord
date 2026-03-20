@@ -21,7 +21,9 @@ import (
 
 type Daemon struct {
 	configPath string
+	dryRun     bool
 	cfg        *config.Config
+	ctx        context.Context
 	mgr        systemd.Manager
 	sm         *statemanager.StateManager
 	notifier   *notify.Notifier
@@ -32,14 +34,23 @@ type Daemon struct {
 	changeCh chan systemd.StateChange
 	healthCh chan healthcheck.Result
 
-	registeredUnits map[string]struct{}
-	mu              sync.Mutex
+	registeredUnits   map[string]struct{}
+	unitCancels       map[string]context.CancelFunc
+	discoveryReloadCh chan struct{}
+	timerReloadCh     chan struct{}
+	discoveryRunning  bool
+	timerRunning      bool
+	mu                sync.Mutex
 }
 
-func New(configPath string) *Daemon {
+func New(configPath string, dryRun bool) *Daemon {
 	return &Daemon{
-		configPath:      configPath,
-		registeredUnits: make(map[string]struct{}),
+		configPath:        configPath,
+		dryRun:            dryRun,
+		registeredUnits:   make(map[string]struct{}),
+		unitCancels:       make(map[string]context.CancelFunc),
+		discoveryReloadCh: make(chan struct{}, 1),
+		timerReloadCh:     make(chan struct{}, 1),
 	}
 }
 
@@ -54,9 +65,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 	setupLogging(cfg.LogLevel)
 
 	ctx, d.cancel = context.WithCancel(ctx)
+	d.ctx = ctx
 	defer d.cancel()
 
-	d.mgr = systemd.NewManager(ctx)
+	mgr := systemd.NewManager(ctx)
+	if d.dryRun {
+		d.mgr = systemd.NewDryRunManager(mgr)
+		slog.Warn("running in dry-run mode, no actions will be performed")
+	} else {
+		d.mgr = mgr
+	}
 	defer d.mgr.Close()
 
 	d.sm = statemanager.New(100)
@@ -66,15 +84,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.sm.OnEvent(d.notifier.HandleEvent)
 	d.sm.OnEvent(d.restarter.HandleEvent)
 
-	dependents := make(map[string][]string)
-	for _, u := range cfg.Units {
-		for _, dep := range u.DependsOn {
-			depUnit := fmt.Sprintf("%s.%s", dep, u.Type)
-			dependents[depUnit] = append(dependents[depUnit], u.UnitName())
-		}
-	}
-
-	d.restarter.SetDependents(dependents)
+	d.restarter.SetDependents(buildDependents(cfg.Units))
 
 	d.changeCh = make(chan systemd.StateChange, 100)
 	d.healthCh = make(chan healthcheck.Result, 100)
@@ -93,10 +103,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 
 	if d.hasDiscoverableUnits() {
+		d.discoveryRunning = true
 		go d.discoveryLoop(ctx)
 	}
 
 	if d.hasTimerMonitoring() {
+		d.timerRunning = true
 		go d.timerMonitorLoop(ctx)
 	}
 
@@ -127,19 +139,25 @@ func (d *Daemon) registerUnit(ctx context.Context, unitName string, unit *config
 		return
 	}
 
+	unitCtx, unitCancel := context.WithCancel(ctx)
 	d.registeredUnits[unitName] = struct{}{}
+	d.unitCancels[unitName] = unitCancel
 	d.mu.Unlock()
 
 	d.sm.Register(unitName)
 
-	state, err := d.mgr.GetUnitState(ctx, unitName)
+	if unit.Restart != nil {
+		d.restarter.Register(unitName, *unit.Restart)
+	}
+
+	state, err := d.mgr.GetUnitState(unitCtx, unitName)
 	if err != nil {
 		slog.Error("getting initial unit state", "unit", unitName, "error", err)
 	} else {
 		d.sm.UpdateState(unitName, state.ActiveState, state.SubState)
 	}
 
-	if err := d.mgr.WatchUnit(ctx, unitName, d.changeCh); err != nil {
+	if err := d.mgr.WatchUnit(unitCtx, unitName, d.changeCh); err != nil {
 		slog.Error("watching unit", "unit", unitName, "error", err)
 	}
 
@@ -158,22 +176,63 @@ func (d *Daemon) registerUnit(ctx context.Context, unitName string, unit *config
 		if unit.GracePeriod > 0 {
 			go func() {
 				select {
-				case <-ctx.Done():
+				case <-unitCtx.Done():
 					return
 				case <-time.After(unit.GracePeriod):
-					checker.Run(ctx)
+					checker.Run(unitCtx)
 				}
 			}()
 		} else {
-			go checker.Run(ctx)
+			go checker.Run(unitCtx)
 		}
 	}
 
-	if unit.Restart != nil {
-		d.restarter.Register(unitName, *unit.Restart)
+	slog.Info("registered unit", "unit", unitName)
+}
+
+func (d *Daemon) unregisterUnit(unitName string) {
+	d.mu.Lock()
+
+	cancel, ok := d.unitCancels[unitName]
+	if !ok {
+		d.mu.Unlock()
+
+		return
 	}
 
-	slog.Info("registered unit", "unit", unitName)
+	delete(d.registeredUnits, unitName)
+	delete(d.unitCancels, unitName)
+	d.mu.Unlock()
+
+	cancel()
+
+	d.restarter.Unregister(unitName)
+	d.sm.Unregister(unitName)
+
+	slog.Info("unregistered unit", "unit", unitName)
+}
+
+func (d *Daemon) findMatchingTemplate(unitName string, templates []*config.UnitConfig) *config.UnitConfig {
+	for _, tmpl := range templates {
+		prefix := tmpl.TemplatePrefix()
+		suffix := fmt.Sprintf(".%s", tmpl.Type)
+
+		if !strings.HasPrefix(unitName, prefix) || !strings.HasSuffix(unitName, suffix) {
+			continue
+		}
+
+		instance := extractInstance(unitName, prefix, tmpl.Type)
+		if tmpl.MatchInstance(instance) {
+			return tmpl
+		}
+	}
+
+	return nil
+}
+
+func (d *Daemon) updateUnit(unitName string, unit *config.UnitConfig) {
+	d.unregisterUnit(unitName)
+	d.registerUnit(d.ctx, unitName, unit)
 }
 
 func (d *Daemon) discoverInstances(ctx context.Context, unit *config.UnitConfig) {
@@ -219,6 +278,8 @@ func (d *Daemon) discoveryLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-d.discoveryReloadCh:
+			ticker.Reset(d.cfg.DiscoveryInterval)
 		case <-ticker.C:
 			for i := range d.cfg.Units {
 				unit := &d.cfg.Units[i]
@@ -255,6 +316,13 @@ func (d *Daemon) timerMonitorLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-d.timerReloadCh:
+			newInterval := d.cfg.DiscoveryInterval
+			if newInterval == 0 {
+				newInterval = 30 * time.Second
+			}
+
+			ticker.Reset(newInterval)
 		case <-ticker.C:
 			d.checkTimers(ctx)
 		}
@@ -340,9 +408,86 @@ func (d *Daemon) reload() {
 		return
 	}
 
+	setupLogging(cfg.LogLevel)
+
+	d.notifier.UpdateConfig(cfg.Notify)
+
+	newUnits := make(map[string]*config.UnitConfig)
+	var templates []*config.UnitConfig
+
+	for i := range cfg.Units {
+		unit := &cfg.Units[i]
+		if !unit.IsEnabled() {
+			continue
+		}
+
+		if unit.IsTemplate() {
+			templates = append(templates, unit)
+		} else {
+			newUnits[unit.UnitName()] = unit
+		}
+	}
+
+	d.mu.Lock()
+	oldUnits := make(map[string]struct{}, len(d.registeredUnits))
+	for name := range d.registeredUnits {
+		oldUnits[name] = struct{}{}
+	}
+	d.mu.Unlock()
+
+	for name := range oldUnits {
+		if _, ok := newUnits[name]; ok {
+			continue
+		}
+
+		if tmpl := d.findMatchingTemplate(name, templates); tmpl != nil {
+			d.updateUnit(name, tmpl)
+
+			continue
+		}
+
+		d.unregisterUnit(name)
+	}
+
+	d.restarter.SetDependents(buildDependents(cfg.Units))
+
+	for unitName, unit := range newUnits {
+		d.mu.Lock()
+		_, exists := d.registeredUnits[unitName]
+		d.mu.Unlock()
+
+		if !exists {
+			d.registerUnit(d.ctx, unitName, unit)
+		} else {
+			d.updateUnit(unitName, unit)
+		}
+	}
+
+	for _, tmpl := range templates {
+		d.discoverInstances(d.ctx, tmpl)
+	}
+
 	d.cfg = cfg
 
-	setupLogging(cfg.LogLevel)
+	if !d.discoveryRunning && d.hasDiscoverableUnits() {
+		d.discoveryRunning = true
+		go d.discoveryLoop(d.ctx)
+	} else {
+		select {
+		case d.discoveryReloadCh <- struct{}{}:
+		default:
+		}
+	}
+
+	if !d.timerRunning && d.hasTimerMonitoring() {
+		d.timerRunning = true
+		go d.timerMonitorLoop(d.ctx)
+	} else {
+		select {
+		case d.timerReloadCh <- struct{}{}:
+		default:
+		}
+	}
 
 	d.sdNotifier.Ready()
 
@@ -368,6 +513,25 @@ func setupLogging(level string) {
 	})
 
 	slog.SetDefault(slog.New(handler))
+}
+
+func buildDependents(units []config.UnitConfig) map[string][]string {
+	dependents := make(map[string][]string)
+
+	for _, u := range units {
+		for _, dep := range u.DependsOn {
+			var depUnit string
+			if strings.HasSuffix(dep, ".service") || strings.HasSuffix(dep, ".timer") {
+				depUnit = dep
+			} else {
+				depUnit = fmt.Sprintf("%s.%s", dep, u.Type)
+			}
+
+			dependents[depUnit] = append(dependents[depUnit], u.UnitName())
+		}
+	}
+
+	return dependents
 }
 
 func extractInstance(unitName, prefix, unitType string) string {

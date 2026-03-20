@@ -9,6 +9,14 @@ systemd-supervisord check
 systemd-supervisord check -c /path/to/config.yaml
 ```
 
+Run the daemon in dry-run mode to observe behavior without performing any actions (start, stop, restart):
+
+```sh
+systemd-supervisord run --dry-run
+```
+
+In dry-run mode, the daemon loads configuration, discovers units, evaluates health checks, and watches for state changes, but all mutating operations are replaced with log messages. This is useful for validating configuration in production before enabling active supervision.
+
 ## Top-Level Options
 
 | Option               | Type     | Required | Default                              | Description                                      |
@@ -149,6 +157,8 @@ Units can declare dependencies on other units. Dependencies are validated at con
 - Circular dependencies are detected and rejected.
 - When a unit is restarted, all units that depend on it are cascade-restarted.
 
+Dependencies can use bare names or fully-qualified names (`name.type`). Bare names resolve to the same type as the dependent unit. Use qualified names when you need to depend on a unit with a different type:
+
 ```yaml
 units:
   - name: mydb
@@ -158,6 +168,15 @@ units:
     type: service
     depends_on:
       - mydb
+
+  - name: backup
+    type: service
+  - name: backup
+    type: timer
+  - name: scheduler
+    type: service
+    depends_on:
+      - backup.timer
 ```
 
 ### Priority and Dependencies

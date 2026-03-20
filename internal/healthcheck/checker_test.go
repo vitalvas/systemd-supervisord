@@ -304,6 +304,9 @@ func TestChecker(t *testing.T) {
 		assert.True(t, healthy)
 	})
 
+}
+
+func TestCheckerAdvanced(t *testing.T) {
 	t.Run("script healthy", func(t *testing.T) {
 		resultCh := make(chan Result, 10)
 
@@ -578,5 +581,33 @@ func TestChecker(t *testing.T) {
 		<-ctx.Done()
 
 		assert.Empty(t, resultCh)
+	})
+
+	t.Run("per-check retries respected", func(t *testing.T) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		defer ln.Close()
+
+		go acceptLoop(ln)
+
+		resultCh := make(chan Result, 10)
+
+		c := New("multi.service", []config.HealthCheck{
+			{Type: "tcp", TCP: &config.TCPHealthCheck{Address: ln.Addr().String()}, Interval: 100 * time.Millisecond, Timeout: 200 * time.Millisecond, Retries: 10},
+			{Type: "tcp", TCP: &config.TCPHealthCheck{Address: "127.0.0.1:1"}, Interval: 100 * time.Millisecond, Timeout: 100 * time.Millisecond, Retries: 3},
+		}, resultCh)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		go c.Run(ctx)
+
+		select {
+		case r := <-resultCh:
+			assert.False(t, r.Healthy)
+			assert.Equal(t, "multi.service", r.UnitName)
+		case <-ctx.Done():
+			t.Fatal("timed out: second check with retries=3 should have triggered unhealthy")
+		}
 	})
 }
