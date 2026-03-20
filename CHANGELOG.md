@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.4](https://github.com/vitalvas/systemd-supervisord/compare/v0.2.3...v0.2.4) (2026-03-20)
+
+
+### Bug Fixes
+
+* sort CLI output by name, subscribe D-Bus once, report initial health ([7ad6029](https://github.com/vitalvas/systemd-supervisord/commit/7ad6029dc2428653053df7e22acbdf4752b487db))
+
 ## [0.2.3](https://github.com/vitalvas/systemd-supervisord/compare/v0.2.2...v0.2.3) (2026-03-20)
 
 
