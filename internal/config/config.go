@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -14,7 +15,7 @@ import (
 
 type Config struct {
 	LogLevel          string        `yaml:"log_level" validate:"omitempty,oneof=debug info warn error"`
-	Units             []UnitConfig  `yaml:"-" validate:"required,min=1,dive"`
+	Units             []UnitConfig  `yaml:"-" validate:"required,min=1"`
 	Notify            NotifyConfig  `yaml:"notify"`
 	Socket            string        `yaml:"socket" validate:"omitempty"`
 	DiscoveryInterval time.Duration `yaml:"discovery_interval" validate:"omitempty,min=5s"`
@@ -36,9 +37,9 @@ type UnitConfig struct {
 
 type HealthCheck struct {
 	Type     string        `yaml:"type" validate:"required,oneof=tcp http unix script"`
-	Interval time.Duration `yaml:"interval" validate:"required,min=1s"`
-	Timeout  time.Duration `yaml:"timeout" validate:"required,min=1s"`
-	Retries  int           `yaml:"retries" validate:"required,min=1"`
+	Interval time.Duration `yaml:"interval" validate:"omitempty,min=1s"`
+	Timeout  time.Duration `yaml:"timeout" validate:"omitempty,min=1s"`
+	Retries  int           `yaml:"retries" validate:"omitempty,min=1"`
 
 	TCP    *TCPHealthCheck    `yaml:"tcp" validate:"required_if=Type tcp"`
 	HTTP   *HTTPHealthCheck   `yaml:"http" validate:"required_if=Type http"`
@@ -292,8 +293,28 @@ func Load(path string) (*Config, error) {
 		cfg.DiscoveryInterval = 30 * time.Second
 	}
 
-	if err := validator.New().Struct(cfg); err != nil {
-		return nil, fmt.Errorf("validating config: %w", err)
+	for i := range cfg.Units {
+		applyDefaults(&cfg.Units[i])
+	}
+
+	validate := validator.New()
+	validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
+		tag := fld.Tag.Get("yaml")
+		if tag == "" || tag == "-" {
+			return strings.ToLower(fld.Name)
+		}
+
+		return strings.Split(tag, ",")[0]
+	})
+
+	if err := validate.Struct(cfg); err != nil {
+		return nil, formatFirstValidationError("", err)
+	}
+
+	for i := range cfg.Units {
+		if err := validate.Struct(&cfg.Units[i]); err != nil {
+			return nil, formatFirstValidationError(cfg.Units[i].UnitName(), err)
+		}
 	}
 
 	if err := validateTemplates(cfg.Units); err != nil {
@@ -302,10 +323,6 @@ func Load(path string) (*Config, error) {
 
 	if err := validateDependencies(cfg.Units); err != nil {
 		return nil, fmt.Errorf("validating config: %w", err)
-	}
-
-	for i := range cfg.Units {
-		applyDefaults(&cfg.Units[i])
 	}
 
 	sort.SliceStable(cfg.Units, func(i, j int) bool {
@@ -514,6 +531,43 @@ func detectCycle(units []UnitConfig) error {
 	}
 
 	return nil
+}
+
+func formatFirstValidationError(unit string, err error) error {
+	errs, ok := err.(validator.ValidationErrors)
+	if !ok {
+		return err
+	}
+
+	e := errs[0]
+
+	field := e.Namespace()
+	if idx := strings.Index(field, "."); idx >= 0 {
+		field = field[idx+1:]
+	}
+
+	var msg string
+
+	switch e.Tag() {
+	case "required", "required_if":
+		msg = fmt.Sprintf("%s is required", field)
+	case "oneof":
+		msg = fmt.Sprintf("%s must be one of [%s]", field, e.Param())
+	case "min":
+		msg = fmt.Sprintf("%s must be at least %s", field, e.Param())
+	case "max":
+		msg = fmt.Sprintf("%s must be at most %s", field, e.Param())
+	case "url":
+		msg = fmt.Sprintf("%s must be a valid URL", field)
+	default:
+		msg = fmt.Sprintf("%s failed validation (%s)", field, e.Tag())
+	}
+
+	if unit != "" {
+		return fmt.Errorf("%s: %s", unit, msg)
+	}
+
+	return fmt.Errorf("%s", msg)
 }
 
 func applyDefaults(u *UnitConfig) {

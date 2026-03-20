@@ -169,11 +169,29 @@ units:
 		assert.Equal(t, 60*time.Second, cfg.Units[0].Restart.Cooldown)
 	})
 
+	t.Run("health check defaults applied", func(t *testing.T) {
+		content := `
+units:
+  app.service:
+    health_checks:
+      - type: http
+        http:
+          address: http://localhost:8080
+`
+		cfg := loadFromString(t, content)
+		require.Len(t, cfg.Units[0].HealthChecks, 1)
+
+		hc := cfg.Units[0].HealthChecks[0]
+		assert.Equal(t, 10*time.Second, hc.Interval)
+		assert.Equal(t, 5*time.Second, hc.Timeout)
+		assert.Equal(t, 3, hc.Retries)
+	})
+
 	t.Run("missing units", func(t *testing.T) {
 		content := `log_level: info`
 		_, err := loadStringConfig(content)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "validating config")
+		assert.Contains(t, err.Error(), "units is required")
 	})
 
 	t.Run("invalid unit key", func(t *testing.T) {
@@ -234,7 +252,7 @@ units:
 `
 		_, err := loadStringConfig(content)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "validating config")
+		assert.Contains(t, err.Error(), "mydb.service: health_checks[0].script is required")
 	})
 
 	t.Run("invalid health check type", func(t *testing.T) {
@@ -485,7 +503,7 @@ units:
 `
 		_, err := loadStringConfig(content)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "validating config")
+		assert.Contains(t, err.Error(), "app.service: health_checks[0].http.method must be one of")
 	})
 }
 
@@ -679,7 +697,7 @@ units:
 `
 		_, err := loadStringConfig(content)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "validating config")
+		assert.Contains(t, err.Error(), "bad.service: priority must be at least 0")
 	})
 }
 
