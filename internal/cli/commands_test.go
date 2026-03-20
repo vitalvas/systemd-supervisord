@@ -454,8 +454,7 @@ func TestCheckCmd(t *testing.T) {
 		configPath := filepath.Join(dir, "config.yaml")
 
 		configContent := `units:
-  - name: test
-    type: service
+  test.service:
     enabled: true
 `
 		require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o644))

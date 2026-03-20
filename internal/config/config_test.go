@@ -10,14 +10,55 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestParseUnitKey(t *testing.T) {
+	t.Run("service", func(t *testing.T) {
+		name, typ, err := parseUnitKey("nginx.service")
+		require.NoError(t, err)
+		assert.Equal(t, "nginx", name)
+		assert.Equal(t, "service", typ)
+	})
+
+	t.Run("timer", func(t *testing.T) {
+		name, typ, err := parseUnitKey("backup.timer")
+		require.NoError(t, err)
+		assert.Equal(t, "backup", name)
+		assert.Equal(t, "timer", typ)
+	})
+
+	t.Run("template service", func(t *testing.T) {
+		name, typ, err := parseUnitKey("worker@.service")
+		require.NoError(t, err)
+		assert.Equal(t, "worker@", name)
+		assert.Equal(t, "service", typ)
+	})
+
+	t.Run("pattern template", func(t *testing.T) {
+		name, typ, err := parseUnitKey("runtime@{app-[a-z]+}.service")
+		require.NoError(t, err)
+		assert.Equal(t, "runtime@{app-[a-z]+}", name)
+		assert.Equal(t, "service", typ)
+	})
+
+	t.Run("missing suffix rejected", func(t *testing.T) {
+		_, _, err := parseUnitKey("nginx")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must end with .service or .timer")
+	})
+
+	t.Run("empty name rejected", func(t *testing.T) {
+		_, _, err := parseUnitKey(".service")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "empty unit name")
+	})
+}
+
 func TestLoad(t *testing.T) {
 	t.Run("valid config", func(t *testing.T) {
 		content := `
 log_level: debug
 socket: /tmp/test.sock
 units:
-  - name: nginx
-    type: service
+  nginx.service:
     enabled: true
     health_checks:
       - type: http
@@ -30,8 +71,7 @@ units:
       enabled: true
       backoff: 10s
       cooldown: 120s
-  - name: backup
-    type: timer
+  backup.timer:
     enabled: true
 notify:
   webhooks:
@@ -82,8 +122,7 @@ notify:
 	t.Run("multiple health checks", func(t *testing.T) {
 		content := `
 units:
-  - name: salt-master
-    type: service
+  salt-master.service:
     enabled: true
     health_checks:
       - type: tcp
@@ -108,8 +147,7 @@ units:
 	t.Run("defaults applied", func(t *testing.T) {
 		content := `
 units:
-  - name: app
-    type: service
+  app.service:
     enabled: true
     health_checks:
       - type: tcp
@@ -138,24 +176,22 @@ units:
 		assert.Contains(t, err.Error(), "validating config")
 	})
 
-	t.Run("invalid unit type", func(t *testing.T) {
+	t.Run("invalid unit key", func(t *testing.T) {
 		content := `
 units:
-  - name: test
-    type: invalid
+  test:
     enabled: true
 `
 		_, err := loadStringConfig(content)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "validating config")
+		assert.Contains(t, err.Error(), "must end with .service or .timer")
 	})
 
 	t.Run("invalid log level", func(t *testing.T) {
 		content := `
 log_level: verbose
 units:
-  - name: test
-    type: service
+  test.service:
     enabled: true
 `
 		_, err := loadStringConfig(content)
@@ -165,8 +201,7 @@ units:
 	t.Run("script health check", func(t *testing.T) {
 		content := `
 units:
-  - name: mydb
-    type: service
+  mydb.service:
     enabled: true
     health_checks:
       - type: script
@@ -189,8 +224,7 @@ units:
 	t.Run("script health check missing command", func(t *testing.T) {
 		content := `
 units:
-  - name: mydb
-    type: service
+  mydb.service:
     enabled: true
     health_checks:
       - type: script
@@ -206,8 +240,7 @@ units:
 	t.Run("invalid health check type", func(t *testing.T) {
 		content := `
 units:
-  - name: test
-    type: service
+  test.service:
     enabled: true
     health_checks:
       - type: grpc
@@ -238,23 +271,21 @@ units:
 	t.Run("duplicate unit rejected", func(t *testing.T) {
 		content := `
 units:
-  - name: nginx
-    type: service
-  - name: nginx
-    type: service
+  nginx.service:
+    enabled: true
+  nginx.service:
+    enabled: false
 `
 		_, err := loadStringConfig(content)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "duplicate unit \"nginx.service\"")
+		assert.Contains(t, err.Error(), "duplicate unit")
 	})
 
 	t.Run("same name different type allowed", func(t *testing.T) {
 		content := `
 units:
-  - name: backup
-    type: service
-  - name: backup
-    type: timer
+  backup.service: {}
+  backup.timer: {}
 `
 		cfg := loadFromString(t, content)
 		require.Len(t, cfg.Units, 2)
@@ -324,8 +355,7 @@ func TestLoadTemplateConfig(t *testing.T) {
 	t.Run("template with health checks", func(t *testing.T) {
 		content := `
 units:
-  - name: myapp@
-    type: service
+  myapp@.service:
     enabled: true
     health_checks:
       - type: tcp
@@ -349,8 +379,7 @@ units:
 	t.Run("discovery interval default", func(t *testing.T) {
 		content := `
 units:
-  - name: app
-    type: service
+  app.service:
     enabled: true
 `
 		cfg := loadFromString(t, content)
@@ -361,8 +390,7 @@ units:
 		content := `
 discovery_interval: 60s
 units:
-  - name: app
-    type: service
+  app.service:
     enabled: true
 `
 		cfg := loadFromString(t, content)
@@ -374,8 +402,7 @@ func TestGracePeriod(t *testing.T) {
 	t.Run("grace period parsed", func(t *testing.T) {
 		content := `
 units:
-  - name: app
-    type: service
+  app.service:
     enabled: true
     grace_period: 30s
 `
@@ -386,8 +413,7 @@ units:
 	t.Run("grace period zero by default", func(t *testing.T) {
 		content := `
 units:
-  - name: app
-    type: service
+  app.service:
     enabled: true
 `
 		cfg := loadFromString(t, content)
@@ -399,8 +425,7 @@ func TestHTTPHealthCheckOptions(t *testing.T) {
 	t.Run("method and expected_status", func(t *testing.T) {
 		content := `
 units:
-  - name: app
-    type: service
+  app.service:
     enabled: true
     health_checks:
       - type: http
@@ -422,8 +447,7 @@ units:
 	t.Run("response_match and headers", func(t *testing.T) {
 		content := `
 units:
-  - name: app
-    type: service
+  app.service:
     enabled: true
     health_checks:
       - type: http
@@ -448,8 +472,7 @@ units:
 	t.Run("invalid method rejected", func(t *testing.T) {
 		content := `
 units:
-  - name: app
-    type: service
+  app.service:
     enabled: true
     health_checks:
       - type: http
@@ -470,8 +493,7 @@ func TestExecConfig(t *testing.T) {
 	t.Run("exec in notify config", func(t *testing.T) {
 		content := `
 units:
-  - name: app
-    type: service
+  app.service:
     enabled: true
 notify:
   execs:
@@ -494,8 +516,7 @@ func TestNotifyVariables(t *testing.T) {
 	t.Run("variables parsed", func(t *testing.T) {
 		content := `
 units:
-  - name: app
-    type: service
+  app.service:
     enabled: true
 notify:
   variables:
@@ -511,8 +532,7 @@ notify:
 	t.Run("empty variables", func(t *testing.T) {
 		content := `
 units:
-  - name: app
-    type: service
+  app.service:
     enabled: true
 notify:
   variables: {}
@@ -526,8 +546,7 @@ func TestMaxDelay(t *testing.T) {
 	t.Run("timer with max_delay", func(t *testing.T) {
 		content := `
 units:
-  - name: certbot-renew
-    type: timer
+  certbot-renew.timer:
     enabled: true
     max_delay: 24h
 `
@@ -538,8 +557,7 @@ units:
 	t.Run("max_delay zero by default", func(t *testing.T) {
 		content := `
 units:
-  - name: certbot-renew
-    type: timer
+  certbot-renew.timer:
     enabled: true
 `
 		cfg := loadFromString(t, content)
@@ -549,8 +567,7 @@ units:
 	t.Run("max_delay on service rejected", func(t *testing.T) {
 		content := `
 units:
-  - name: app
-    type: service
+  app.service:
     enabled: true
     max_delay: 10s
 `
@@ -564,8 +581,8 @@ func TestInstancePattern(t *testing.T) {
 	t.Run("template with pattern filters instances", func(t *testing.T) {
 		content := `
 units:
-  - name: "runtime@{app-[a-z]+[0-9]+}"
-    type: service
+  "runtime@{app-[a-z]+[0-9]+}.service":
+    enabled: true
 `
 		cfg := loadFromString(t, content)
 		u := cfg.Units[0]
@@ -578,8 +595,7 @@ units:
 	t.Run("bare template matches all", func(t *testing.T) {
 		content := `
 units:
-  - name: worker@
-    type: service
+  worker@.service: {}
 `
 		cfg := loadFromString(t, content)
 		u := cfg.Units[0]
@@ -590,8 +606,7 @@ units:
 	t.Run("empty pattern rejected", func(t *testing.T) {
 		content := `
 units:
-  - name: "worker@{}"
-    type: service
+  "worker@{}.service": {}
 `
 		_, err := loadStringConfig(content)
 		require.Error(t, err)
@@ -601,8 +616,7 @@ units:
 	t.Run("invalid regex rejected", func(t *testing.T) {
 		content := `
 units:
-  - name: "worker@{[invalid}"
-    type: service
+  "worker@{[invalid}.service": {}
 `
 		_, err := loadStringConfig(content)
 		require.Error(t, err)
@@ -614,14 +628,11 @@ func TestPriority(t *testing.T) {
 	t.Run("units sorted by priority", func(t *testing.T) {
 		content := `
 units:
-  - name: low
-    type: service
+  low.service:
     priority: 100
-  - name: high
-    type: service
+  high.service:
     priority: 0
-  - name: mid
-    type: service
+  mid.service:
     priority: 50
 `
 		cfg := loadFromString(t, content)
@@ -634,11 +645,9 @@ units:
 	t.Run("default priority is 999", func(t *testing.T) {
 		content := `
 units:
-  - name: explicit
-    type: service
+  explicit.service:
     priority: 10
-  - name: default
-    type: service
+  default.service: {}
 `
 		cfg := loadFromString(t, content)
 		require.Len(t, cfg.Units, 2)
@@ -651,12 +660,9 @@ units:
 	t.Run("stable sort preserves order for same priority", func(t *testing.T) {
 		content := `
 units:
-  - name: first
-    type: service
-  - name: second
-    type: service
-  - name: third
-    type: service
+  first.service: {}
+  second.service: {}
+  third.service: {}
 `
 		cfg := loadFromString(t, content)
 		require.Len(t, cfg.Units, 3)
@@ -668,8 +674,7 @@ units:
 	t.Run("negative priority rejected", func(t *testing.T) {
 		content := `
 units:
-  - name: bad
-    type: service
+  bad.service:
     priority: -1
 `
 		_, err := loadStringConfig(content)
@@ -682,11 +687,9 @@ func TestDependencies(t *testing.T) {
 	t.Run("valid dependencies", func(t *testing.T) {
 		content := `
 units:
-  - name: db
-    type: service
+  db.service:
     enabled: true
-  - name: app
-    type: service
+  app.service:
     enabled: true
     depends_on:
       - db
@@ -698,8 +701,7 @@ units:
 	t.Run("unknown dependency rejected", func(t *testing.T) {
 		content := `
 units:
-  - name: app
-    type: service
+  app.service:
     enabled: true
     depends_on:
       - nonexistent
@@ -712,13 +714,11 @@ units:
 	t.Run("circular dependency rejected", func(t *testing.T) {
 		content := `
 units:
-  - name: a
-    type: service
+  a.service:
     enabled: true
     depends_on:
       - b
-  - name: b
-    type: service
+  b.service:
     enabled: true
     depends_on:
       - a
@@ -731,8 +731,7 @@ units:
 	t.Run("self dependency rejected", func(t *testing.T) {
 		content := `
 units:
-  - name: app
-    type: service
+  app.service:
     enabled: true
     depends_on:
       - app
@@ -745,16 +744,13 @@ units:
 	t.Run("dependency order", func(t *testing.T) {
 		content := `
 units:
-  - name: app
-    type: service
+  app.service:
     enabled: true
     depends_on:
       - db
-  - name: db
-    type: service
+  db.service:
     enabled: true
-  - name: cache
-    type: service
+  cache.service:
     enabled: true
     depends_on:
       - db
@@ -783,16 +779,13 @@ units:
 	t.Run("dependents lookup", func(t *testing.T) {
 		content := `
 units:
-  - name: db
-    type: service
+  db.service:
     enabled: true
-  - name: app
-    type: service
+  app.service:
     enabled: true
     depends_on:
       - db
-  - name: worker
-    type: service
+  worker.service:
     enabled: true
     depends_on:
       - db
@@ -805,12 +798,9 @@ units:
 	t.Run("qualified dependency on different type", func(t *testing.T) {
 		content := `
 units:
-  - name: backup
-    type: service
-  - name: backup
-    type: timer
-  - name: app
-    type: service
+  backup.service: {}
+  backup.timer: {}
+  app.service:
     depends_on:
       - backup.timer
 `
@@ -821,8 +811,7 @@ units:
 	t.Run("qualified dependency on unknown unit rejected", func(t *testing.T) {
 		content := `
 units:
-  - name: app
-    type: service
+  app.service:
     depends_on:
       - missing.timer
 `
@@ -834,12 +823,10 @@ units:
 	t.Run("qualified dependency circular rejected", func(t *testing.T) {
 		content := `
 units:
-  - name: a
-    type: service
+  a.service:
     depends_on:
       - b.service
-  - name: b
-    type: service
+  b.service:
     depends_on:
       - a
 `
@@ -851,12 +838,10 @@ units:
 	t.Run("qualified dependency order", func(t *testing.T) {
 		content := `
 units:
-  - name: app
-    type: service
+  app.service:
     depends_on:
       - db.service
-  - name: db
-    type: service
+  db.service: {}
 `
 		cfg := loadFromString(t, content)
 		order := cfg.DependencyOrder()
@@ -879,12 +864,9 @@ units:
 	t.Run("qualified dependents lookup", func(t *testing.T) {
 		content := `
 units:
-  - name: backup
-    type: service
-  - name: backup
-    type: timer
-  - name: app
-    type: service
+  backup.service: {}
+  backup.timer: {}
+  app.service:
     depends_on:
       - backup.timer
 `
@@ -896,8 +878,7 @@ units:
 	t.Run("no dependents", func(t *testing.T) {
 		content := `
 units:
-  - name: app
-    type: service
+  app.service:
     enabled: true
 `
 		cfg := loadFromString(t, content)

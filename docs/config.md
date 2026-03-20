@@ -24,25 +24,23 @@ In dry-run mode, the daemon loads configuration, discovers units, evaluates heal
 | `log_level`          | string   | No       | `info`                               | Log verbosity. One of: `debug`, `info`, `warn`, `error`. |
 | `socket`             | string   | No       | `/var/run/systemd-supervisord.sock`  | Unix socket path for CLI-to-daemon communication. |
 | `discovery_interval` | duration | No       | `30s`                                | How often to scan for new template unit instances. Minimum: `5s`. |
-| `units`              | list     | Yes      | --                                   | List of unit configurations. At least one unit is required. |
+| `units`              | map      | Yes      | --                                   | Map of unit configurations keyed by `name.type`. At least one unit is required. |
 | `notify`             | object   | No       | --                                   | Notification configuration.                      |
 
 ```yaml
 log_level: info
 socket: /var/run/systemd-supervisord.sock
 discovery_interval: 30s
-units: []
+units: {}
 notify: {}
 ```
 
 ## Unit Configuration
 
-Each entry in the `units` list defines a systemd unit to supervise.
+Each entry in the `units` map defines a systemd unit to supervise. The map key is the fully-qualified unit name in `name.type` format (e.g., `nginx.service`, `backup.timer`). Names ending with `@` before the suffix are auto-discovered as template units. Use `name@{regex}.type` to filter instances by pattern.
 
 | Option          | Type     | Required | Default | Description                                                |
 |-----------------|----------|----------|---------|------------------------------------------------------------|
-| `name`          | string   | Yes      | --      | Unit name without the `.service`/`.timer` suffix. Names ending with `@` are auto-discovered as template units. Use `name@{regex}` to filter instances by pattern. For specific instances, use `name@instance`. |
-| `type`          | string   | No       | `service` | One of: `service`, `timer`.                              |
 | `enabled`       | bool     | No       | `true`  | Whether this unit is actively supervised.                  |
 | `priority`      | int      | No       | `999`   | Startup ordering priority. Lower values start first. Minimum: `0`. |
 | `depends_on`    | list     | No       | --      | Unit names that must start before this unit.               |
@@ -57,8 +55,7 @@ A static unit monitors a single systemd unit directly:
 
 ```yaml
 units:
-  - name: nginx
-    type: service
+  nginx.service:
     enabled: true
 ```
 
@@ -70,11 +67,9 @@ Timer units monitor systemd timers. Since timers do not have network endpoints, 
 
 ```yaml
 units:
-  - name: certbot-renew
-    type: timer
+  certbot-renew.timer:
     enabled: true
-  - name: logrotate
-    type: timer
+  logrotate.timer:
     enabled: true
 ```
 
@@ -86,8 +81,7 @@ Use `max_delay` to ensure a timer has triggered within a required time window. T
 
 ```yaml
 units:
-  - name: certbot-renew
-    type: timer
+  certbot-renew.timer:
     enabled: true
     max_delay: 48h
 ```
@@ -100,11 +94,9 @@ In systemd, template instances like `myapp@shard0.service` and `myapp@shard1.ser
 
 ```yaml
 units:
-  - name: myapp@shard0
-    type: service
+  myapp@shard0.service:
     enabled: true
-  - name: myapp@shard1
-    type: service
+  myapp@shard1.service:
     enabled: true
 ```
 
@@ -114,8 +106,7 @@ Unit names ending with `@` are automatically treated as template units. The daem
 
 ```yaml
 units:
-  - name: worker@
-    type: service
+  worker@.service: {}
 ```
 
 The daemon scans for running `worker@*.service` instances every `discovery_interval`. New instances are picked up automatically.
@@ -126,8 +117,7 @@ Use `name@{regex}` to restrict discovery to instances matching a regular express
 
 ```yaml
 units:
-  - name: "runtime@{app-[a-z]+[0-9]+}"
-    type: service
+  "runtime@{app-[a-z]+[0-9]+}.service": {}
 ```
 
 This discovers only instances like `runtime@app-web1.service` or `runtime@app-api2.service`, ignoring `runtime@db-main.service`.
@@ -138,14 +128,11 @@ Controls the order in which units are registered at startup. Lower values are re
 
 ```yaml
 units:
-  - name: database
-    type: service
+  database.service:
     priority: 0
-  - name: cache
-    type: service
+  cache.service:
     priority: 10
-  - name: webapp
-    type: service
+  webapp.service:
     priority: 100
 ```
 
@@ -161,20 +148,15 @@ Dependencies can use bare names or fully-qualified names (`name.type`). Bare nam
 
 ```yaml
 units:
-  - name: mydb
-    type: service
+  mydb.service: {}
 
-  - name: elasticsearch
-    type: service
+  elasticsearch.service:
     depends_on:
       - mydb
 
-  - name: backup
-    type: service
-  - name: backup
-    type: timer
-  - name: scheduler
-    type: service
+  backup.service: {}
+  backup.timer: {}
+  scheduler.service:
     depends_on:
       - backup.timer
 ```
@@ -188,14 +170,11 @@ units:
 
 ```yaml
 units:
-  - name: mydb
-    type: service
+  mydb.service:
     priority: 0
-  - name: cache
-    type: service
+  cache.service:
     priority: 10
-  - name: webapp
-    type: service
+  webapp.service:
     priority: 100
     depends_on:
       - mydb
@@ -210,8 +189,7 @@ Delays the start of health checks after unit registration. This is useful for se
 
 ```yaml
 units:
-  - name: elasticsearch
-    type: service
+  elasticsearch.service:
     enabled: true
     grace_period: 30s
 ```
@@ -325,8 +303,7 @@ For discovered template units, use `{{instance}}` in health check addresses. It 
 
 ```yaml
 units:
-  - name: worker@
-    type: service
+  worker@.service:
     health_checks:
       - type: http
         interval: 10s

@@ -4,8 +4,7 @@ discovery_interval: 30s
 
 units:
   # Static unit - single health check
-  - name: nginx
-    type: service
+  nginx.service:
     enabled: true
     health_checks:
       - type: http
@@ -21,8 +20,7 @@ units:
 
   # Static unit - multiple health check endpoints
   # Unit is healthy only when ALL endpoints pass
-  - name: salt-master
-    type: service
+  salt-master.service:
     enabled: true
     health_checks:
       - type: tcp
@@ -44,8 +42,7 @@ units:
 
   # Individual template instances
   # Each instance is a separate unit in systemd
-  - name: myapp@shard0
-    type: service
+  myapp@shard0.service:
     enabled: true
     health_checks:
       - type: tcp
@@ -59,8 +56,7 @@ units:
       backoff: 5s
       cooldown: 60s
 
-  - name: myapp@shard1
-    type: service
+  myapp@shard1.service:
     enabled: true
     health_checks:
       - type: tcp
@@ -75,11 +71,10 @@ units:
       cooldown: 60s
 
   # Template unit with auto-discovery
-  # Names ending with @ are auto-discovered
+  # Names ending with @ before the suffix are auto-discovered
   # Finds all running worker@*.service instances automatically
   # New instances are picked up every discovery_interval
-  - name: worker@
-    type: service
+  worker@.service:
     health_checks:
       - type: http
         interval: 10s
@@ -95,13 +90,11 @@ units:
   # Template with instance pattern filter
   # Only discovers instances matching the regex inside {}
   # e.g. runtime@app-web1.service matches, runtime@db-main.service does not
-  - name: "runtime@{app-[a-z]+[0-9]+}"
-    type: service
+  "runtime@{app-[a-z]+[0-9]+}.service": {}
 
   # Unit with script-based health check
   # Script must exit 0 for healthy, non-zero for unhealthy
-  - name: mydb
-    type: service
+  mydb.service:
     enabled: true
     health_checks:
       - type: script
@@ -117,8 +110,7 @@ units:
 
   # Unit with grace period - health checks start after 30s
   # Useful for services with slow startup
-  - name: elasticsearch
-    type: service
+  elasticsearch.service:
     enabled: true
     grace_period: 30s
     depends_on:
@@ -142,13 +134,11 @@ units:
 
   # Timer unit with execution monitoring
   # Restart if the timer has not triggered within max_delay
-  - name: certbot-renew
-    type: timer
+  certbot-renew.timer:
     enabled: true
     max_delay: 48h
 
-  - name: salt-minion-state-highstate
-    type: timer
+  salt-minion-state-highstate.timer:
     enabled: true
     max_delay: 1h
 

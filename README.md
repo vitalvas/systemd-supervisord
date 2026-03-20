@@ -32,8 +32,7 @@ Create the configuration file at `/etc/systemd-supervisord/config.yaml`.
 
 ```yaml
 units:
-  - name: nginx
-    type: service          # service or timer
+  nginx.service:
     enabled: true
     grace_period: 30s      # delay before health checks start
     depends_on:            # units that must be started first
@@ -60,8 +59,7 @@ units:
 
 ```yaml
 units:
-  - name: certbot-renew
-    type: timer
+  certbot-renew.timer:
     enabled: true
     max_delay: 48h       # restart if not triggered within 48 hours
 ```
@@ -71,21 +69,19 @@ units:
 In systemd, template instances are independent units. Configure each as a separate entry:
 
 ```yaml
-- name: myapp@shard0
-  type: service
-  enabled: true
-- name: myapp@shard1
-  type: service
-  enabled: true
+units:
+  myapp@shard0.service:
+    enabled: true
+  myapp@shard1.service:
+    enabled: true
 ```
 
-Names ending with `@` are automatically discovered as template units. Use `name@{regex}` to filter instances by pattern:
+Names ending with `@` before the suffix are automatically discovered as template units. Use `name@{regex}.type` to filter instances by pattern:
 
 ```yaml
-- name: worker@
-  type: service
-- name: "runtime@{app-[a-z]+[0-9]+}"
-  type: service
+units:
+  worker@.service: {}
+  "runtime@{app-[a-z]+[0-9]+}.service": {}
 ```
 
 Discovered instances can use `{{instance}}` in health check addresses:

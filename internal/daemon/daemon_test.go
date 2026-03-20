@@ -689,8 +689,7 @@ func TestDiscoverInstances(t *testing.T) {
 
 		_, err = tmpFile.WriteString(`
 units:
-  - name: "runtime@{app-[a-z]+[0-9]+}"
-    type: service
+  "runtime@{app-[a-z]+[0-9]+}.service": {}
 `)
 		require.NoError(t, err)
 		require.NoError(t, tmpFile.Close())
@@ -842,8 +841,7 @@ func TestEventLoop(t *testing.T) {
 		defer os.Remove(tmpFile.Name())
 
 		configData := `units:
-  - name: test
-    type: service
+  test.service:
     enabled: true
 `
 		_, err = tmpFile.WriteString(configData)
@@ -965,8 +963,7 @@ func TestRun(t *testing.T) {
 
 		configData := `socket: /nonexistent/deeply/nested/path/test.sock
 units:
-  - name: test
-    type: service
+  test.service:
     enabled: false
 `
 		_, err = tmpFile.WriteString(configData)
@@ -985,7 +982,7 @@ units:
 		require.NoError(t, err)
 		defer os.Remove(tmpFile.Name())
 
-		_, err = tmpFile.WriteString("units: []\n")
+		_, err = tmpFile.WriteString("units: {}\n")
 		require.NoError(t, err)
 		require.NoError(t, tmpFile.Close())
 
@@ -1004,8 +1001,7 @@ func TestReload(t *testing.T) {
 		defer os.Remove(tmpFile.Name())
 
 		configData := `units:
-  - name: test
-    type: service
+  test.service:
     enabled: true
 `
 		_, err = tmpFile.WriteString(configData)
@@ -1075,7 +1071,7 @@ func TestReload(t *testing.T) {
 		require.NoError(t, err)
 		defer os.Remove(tmpFile.Name())
 
-		_, err = tmpFile.WriteString("units: []\n")
+		_, err = tmpFile.WriteString("units: {}\n")
 		require.NoError(t, err)
 		require.NoError(t, tmpFile.Close())
 
@@ -1100,10 +1096,8 @@ func TestReload(t *testing.T) {
 		defer os.Remove(tmpFile.Name())
 
 		configData := `units:
-  - name: old
-    type: service
-  - name: new
-    type: service
+  old.service: {}
+  new.service: {}
 `
 		_, err = tmpFile.WriteString(configData)
 		require.NoError(t, err)
@@ -1139,8 +1133,7 @@ func TestReload(t *testing.T) {
 		defer os.Remove(tmpFile.Name())
 
 		configData := `units:
-  - name: kept
-    type: service
+  kept.service: {}
 `
 		_, err = tmpFile.WriteString(configData)
 		require.NoError(t, err)
@@ -1178,8 +1171,7 @@ func TestReload(t *testing.T) {
 		defer os.Remove(tmpFile.Name())
 
 		configData := `units:
-  - name: "worker@"
-    type: service
+  "worker@.service": {}
 `
 		_, err = tmpFile.WriteString(configData)
 		require.NoError(t, err)
@@ -1218,8 +1210,7 @@ func TestReload(t *testing.T) {
 		defer os.Remove(tmpFile.Name())
 
 		configData := `units:
-  - name: "worker@"
-    type: service
+  "worker@.service": {}
 `
 		_, err = tmpFile.WriteString(configData)
 		require.NoError(t, err)
@@ -1253,8 +1244,7 @@ func TestReload(t *testing.T) {
 		defer os.Remove(tmpFile.Name())
 
 		configData := `units:
-  - name: backup
-    type: timer
+  backup.timer:
     max_delay: 1h
 `
 		_, err = tmpFile.WriteString(configData)
@@ -1286,8 +1276,7 @@ func TestReload(t *testing.T) {
 		defer os.Remove(tmpFile.Name())
 
 		configData := `units:
-  - name: app
-    type: service
+  app.service: {}
 `
 		_, err = tmpFile.WriteString(configData)
 		require.NoError(t, err)
@@ -1319,8 +1308,7 @@ func TestReload(t *testing.T) {
 func TestFindMatchingTemplate(t *testing.T) {
 	t.Run("matches bare template", func(t *testing.T) {
 		cfgData := `units:
-  - name: "worker@"
-    type: service
+  "worker@.service": {}
 `
 		tmpFile, err := os.CreateTemp("", "test-config-*.yaml")
 		require.NoError(t, err)
@@ -1344,8 +1332,7 @@ func TestFindMatchingTemplate(t *testing.T) {
 
 	t.Run("matches pattern template", func(t *testing.T) {
 		cfgData := `units:
-  - name: "app@{web-[0-9]+}"
-    type: service
+  "app@{web-[0-9]+}.service": {}
 `
 		tmpFile, err := os.CreateTemp("", "test-config-*.yaml")
 		require.NoError(t, err)

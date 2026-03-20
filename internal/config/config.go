@@ -14,15 +14,15 @@ import (
 
 type Config struct {
 	LogLevel          string        `yaml:"log_level" validate:"omitempty,oneof=debug info warn error"`
-	Units             []UnitConfig  `yaml:"units" validate:"required,min=1,dive"`
+	Units             []UnitConfig  `yaml:"-" validate:"required,min=1,dive"`
 	Notify            NotifyConfig  `yaml:"notify"`
 	Socket            string        `yaml:"socket" validate:"omitempty"`
 	DiscoveryInterval time.Duration `yaml:"discovery_interval" validate:"omitempty,min=5s"`
 }
 
 type UnitConfig struct {
-	Name         string         `yaml:"name" validate:"required"`
-	Type         string         `yaml:"type" validate:"omitempty,oneof=service timer"`
+	Name         string         `yaml:"-" validate:"required"`
+	Type         string         `yaml:"-" validate:"required,oneof=service timer"`
 	Enabled      *bool          `yaml:"enabled"`
 	Priority     *int           `yaml:"priority" validate:"omitempty,min=0"`
 	DependsOn    []string       `yaml:"depends_on"`
@@ -248,33 +248,51 @@ func (u *UnitConfig) ResolveHealthChecks(instance string) []HealthCheck {
 	return resolved
 }
 
+type rawConfig struct {
+	LogLevel          string        `yaml:"log_level"`
+	Units             yaml.Node     `yaml:"units"`
+	Notify            NotifyConfig  `yaml:"notify"`
+	Socket            string        `yaml:"socket"`
+	DiscoveryInterval time.Duration `yaml:"discovery_interval"`
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading config: %w", err)
 	}
 
-	cfg := &Config{
-		LogLevel:          "info",
-		Socket:            "/var/run/systemd-supervisord.sock",
-		DiscoveryInterval: 30 * time.Second,
-	}
-
-	if err := yaml.Unmarshal(data, cfg); err != nil {
+	raw := &rawConfig{}
+	if err := yaml.Unmarshal(data, raw); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
-	for i := range cfg.Units {
-		if cfg.Units[i].Type == "" {
-			cfg.Units[i].Type = "service"
-		}
+	units, err := parseUnits(&raw.Units)
+	if err != nil {
+		return nil, fmt.Errorf("parsing config: %w", err)
+	}
+
+	cfg := &Config{
+		LogLevel:          raw.LogLevel,
+		Units:             units,
+		Notify:            raw.Notify,
+		Socket:            raw.Socket,
+		DiscoveryInterval: raw.DiscoveryInterval,
+	}
+
+	if cfg.LogLevel == "" {
+		cfg.LogLevel = "info"
+	}
+
+	if cfg.Socket == "" {
+		cfg.Socket = "/var/run/systemd-supervisord.sock"
+	}
+
+	if cfg.DiscoveryInterval == 0 {
+		cfg.DiscoveryInterval = 30 * time.Second
 	}
 
 	if err := validator.New().Struct(cfg); err != nil {
-		return nil, fmt.Errorf("validating config: %w", err)
-	}
-
-	if err := validateUniqueUnits(cfg.Units); err != nil {
 		return nil, fmt.Errorf("validating config: %w", err)
 	}
 
@@ -297,19 +315,73 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-func validateUniqueUnits(units []UnitConfig) error {
-	seen := make(map[string]struct{}, len(units))
+func parseUnitKey(key string) (string, string, error) {
+	if strings.HasSuffix(key, ".service") {
+		name := strings.TrimSuffix(key, ".service")
+		if name == "" {
+			return "", "", fmt.Errorf("empty unit name in key %q", key)
+		}
 
-	for _, u := range units {
-		key := u.UnitName()
+		return name, "service", nil
+	}
+
+	if strings.HasSuffix(key, ".timer") {
+		name := strings.TrimSuffix(key, ".timer")
+		if name == "" {
+			return "", "", fmt.Errorf("empty unit name in key %q", key)
+		}
+
+		return name, "timer", nil
+	}
+
+	return "", "", fmt.Errorf("unit key %q must end with .service or .timer", key)
+}
+
+func parseUnits(node *yaml.Node) ([]UnitConfig, error) {
+	if node.Kind == 0 {
+		return nil, nil
+	}
+
+	if node.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("units must be a map, got %v", node.Kind)
+	}
+
+	if len(node.Content)%2 != 0 {
+		return nil, fmt.Errorf("invalid units map structure")
+	}
+
+	seen := make(map[string]struct{})
+	units := make([]UnitConfig, 0, len(node.Content)/2)
+
+	for i := 0; i < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valNode := node.Content[i+1]
+
+		key := keyNode.Value
+
 		if _, exists := seen[key]; exists {
-			return fmt.Errorf("duplicate unit %q", key)
+			return nil, fmt.Errorf("duplicate unit %q", key)
 		}
 
 		seen[key] = struct{}{}
+
+		name, typ, err := parseUnitKey(key)
+		if err != nil {
+			return nil, err
+		}
+
+		var u UnitConfig
+		if err := valNode.Decode(&u); err != nil {
+			return nil, fmt.Errorf("decoding unit %q: %w", key, err)
+		}
+
+		u.Name = name
+		u.Type = typ
+
+		units = append(units, u)
 	}
 
-	return nil
+	return units, nil
 }
 
 func validateTemplates(units []UnitConfig) error {
