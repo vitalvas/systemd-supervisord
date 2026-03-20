@@ -610,6 +610,74 @@ units:
 	})
 }
 
+func TestPriority(t *testing.T) {
+	t.Run("units sorted by priority", func(t *testing.T) {
+		content := `
+units:
+  - name: low
+    type: service
+    priority: 100
+  - name: high
+    type: service
+    priority: 0
+  - name: mid
+    type: service
+    priority: 50
+`
+		cfg := loadFromString(t, content)
+		require.Len(t, cfg.Units, 3)
+		assert.Equal(t, "high", cfg.Units[0].Name)
+		assert.Equal(t, "mid", cfg.Units[1].Name)
+		assert.Equal(t, "low", cfg.Units[2].Name)
+	})
+
+	t.Run("default priority is 999", func(t *testing.T) {
+		content := `
+units:
+  - name: explicit
+    type: service
+    priority: 10
+  - name: default
+    type: service
+`
+		cfg := loadFromString(t, content)
+		require.Len(t, cfg.Units, 2)
+		assert.Equal(t, "explicit", cfg.Units[0].Name)
+		assert.Equal(t, 10, cfg.Units[0].GetPriority())
+		assert.Equal(t, "default", cfg.Units[1].Name)
+		assert.Equal(t, 999, cfg.Units[1].GetPriority())
+	})
+
+	t.Run("stable sort preserves order for same priority", func(t *testing.T) {
+		content := `
+units:
+  - name: first
+    type: service
+  - name: second
+    type: service
+  - name: third
+    type: service
+`
+		cfg := loadFromString(t, content)
+		require.Len(t, cfg.Units, 3)
+		assert.Equal(t, "first", cfg.Units[0].Name)
+		assert.Equal(t, "second", cfg.Units[1].Name)
+		assert.Equal(t, "third", cfg.Units[2].Name)
+	})
+
+	t.Run("negative priority rejected", func(t *testing.T) {
+		content := `
+units:
+  - name: bad
+    type: service
+    priority: -1
+`
+		_, err := loadStringConfig(content)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "validating config")
+	})
+}
+
 func TestDependencies(t *testing.T) {
 	t.Run("valid dependencies", func(t *testing.T) {
 		content := `

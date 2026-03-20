@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ type UnitConfig struct {
 	Name         string         `yaml:"name" validate:"required"`
 	Type         string         `yaml:"type" validate:"omitempty,oneof=service timer"`
 	Enabled      *bool          `yaml:"enabled"`
+	Priority     *int           `yaml:"priority" validate:"omitempty,min=0"`
 	DependsOn    []string       `yaml:"depends_on"`
 	GracePeriod  time.Duration  `yaml:"grace_period" validate:"omitempty,min=0s"`
 	MaxDelay     time.Duration  `yaml:"max_delay" validate:"omitempty,min=1s"`
@@ -140,6 +142,16 @@ func (c *Config) Dependents(unitName string) []string {
 	}
 
 	return result
+}
+
+const DefaultPriority = 999
+
+func (u *UnitConfig) GetPriority() int {
+	if u.Priority == nil {
+		return DefaultPriority
+	}
+
+	return *u.Priority
 }
 
 func (u *UnitConfig) IsEnabled() bool {
@@ -272,6 +284,10 @@ func Load(path string) (*Config, error) {
 	for i := range cfg.Units {
 		applyDefaults(&cfg.Units[i])
 	}
+
+	sort.SliceStable(cfg.Units, func(i, j int) bool {
+		return cfg.Units[i].GetPriority() < cfg.Units[j].GetPriority()
+	})
 
 	return cfg, nil
 }

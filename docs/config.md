@@ -36,6 +36,7 @@ Each entry in the `units` list defines a systemd unit to supervise.
 | `name`          | string   | Yes      | --      | Unit name without the `.service`/`.timer` suffix. Names ending with `@` are auto-discovered as template units. Use `name@{regex}` to filter instances by pattern. For specific instances, use `name@instance`. |
 | `type`          | string   | No       | `service` | One of: `service`, `timer`.                              |
 | `enabled`       | bool     | No       | `true`  | Whether this unit is actively supervised.                  |
+| `priority`      | int      | No       | `999`   | Startup ordering priority. Lower values start first. Minimum: `0`. |
 | `depends_on`    | list     | No       | --      | Unit names that must start before this unit.               |
 | `grace_period`  | duration | No       | `0s`    | Delay before health checks begin. Useful for slow-starting services. |
 | `max_delay`     | duration | No       | --      | Maximum allowed time since last timer trigger. Timer-only. If exceeded, the timer is restarted. Minimum: `1s`. |
@@ -123,27 +124,66 @@ units:
 
 This discovers only instances like `runtime@app-web1.service` or `runtime@app-api2.service`, ignoring `runtime@db-main.service`.
 
+### Priority
+
+Controls the order in which units are registered at startup. Lower values are registered first. Units with the same priority preserve their config file order. Default is `999`.
+
+```yaml
+units:
+  - name: database
+    type: service
+    priority: 0
+  - name: cache
+    type: service
+    priority: 10
+  - name: webapp
+    type: service
+    priority: 100
+```
+
 ### Dependencies
 
 Units can declare dependencies on other units. Dependencies are validated at config load time:
 
 - All referenced units must exist in the configuration.
 - Circular dependencies are detected and rejected.
-- Units start in dependency order (dependencies first).
 - When a unit is restarted, all units that depend on it are cascade-restarted.
 
 ```yaml
 units:
   - name: mydb
     type: service
-    enabled: true
 
   - name: elasticsearch
     type: service
-    enabled: true
     depends_on:
       - mydb
 ```
+
+### Priority and Dependencies
+
+`priority` and `depends_on` serve different purposes and can be used together:
+
+- **`priority`** controls the startup registration order. Units with lower priority are registered first.
+- **`depends_on`** controls cascade restarts. When a dependency fails and is restarted, all units that depend on it are restarted too.
+
+```yaml
+units:
+  - name: mydb
+    type: service
+    priority: 0
+  - name: cache
+    type: service
+    priority: 10
+  - name: webapp
+    type: service
+    priority: 100
+    depends_on:
+      - mydb
+      - cache
+```
+
+In this example, `mydb` is registered first (priority 0), then `cache` (10), then `webapp` (100). If `mydb` is restarted, `webapp` is cascade-restarted because it depends on `mydb`.
 
 ### Grace Period
 
