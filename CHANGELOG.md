@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/vitalvas/systemd-supervisord/compare/v0.2.1...v0.2.2) (2026-03-20)
+
+
+### Bug Fixes
+
+* improve config validation defaults and error messages ([ded9060](https://github.com/vitalvas/systemd-supervisord/commit/ded90602ab7ff999d333994294e1869f462c58a8))
+
 ## [0.2.1](https://github.com/vitalvas/systemd-supervisord/compare/v0.2.0...v0.2.1) (2026-03-20)
 
 
