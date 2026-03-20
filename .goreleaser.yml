@@ -32,6 +32,8 @@ nfpms:
     contents:
       - src: misc/systemd-supervisord.service
         dst: /lib/systemd/system/systemd-supervisord.service
+      - dst: /etc/systemd-supervisord
+        type: dir
     scripts:
       postinstall: misc/postinstall.sh
 checksum:

@@ -79,13 +79,13 @@ In systemd, template instances are independent units. Configure each as a separa
   enabled: true
 ```
 
-For dynamic instances, use auto-discovery on a template name (ending with `@`):
+Names ending with `@` are automatically discovered as template units. Use `name@{regex}` to filter instances by pattern:
 
 ```yaml
 - name: worker@
   type: service
-  enabled: true
-  discover: true
+- name: "runtime@{app-[a-z]+[0-9]+}"
+  type: service
 ```
 
 Discovered instances can use `{{instance}}` in health check addresses:

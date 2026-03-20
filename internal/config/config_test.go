@@ -50,7 +50,7 @@ notify:
 		nginx := cfg.Units[0]
 		assert.Equal(t, "nginx", nginx.Name)
 		assert.Equal(t, "service", nginx.Type)
-		assert.True(t, nginx.Enabled)
+		assert.True(t, nginx.IsEnabled())
 		assert.Equal(t, "nginx.service", nginx.UnitName())
 
 		require.Len(t, nginx.HealthChecks, 1)
@@ -234,6 +234,31 @@ units:
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "parsing config")
 	})
+
+	t.Run("duplicate unit rejected", func(t *testing.T) {
+		content := `
+units:
+  - name: nginx
+    type: service
+  - name: nginx
+    type: service
+`
+		_, err := loadStringConfig(content)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicate unit \"nginx.service\"")
+	})
+
+	t.Run("same name different type allowed", func(t *testing.T) {
+		content := `
+units:
+  - name: backup
+    type: service
+  - name: backup
+    type: timer
+`
+		cfg := loadFromString(t, content)
+		require.Len(t, cfg.Units, 2)
+	})
 }
 
 func TestUnitConfig(t *testing.T) {
@@ -246,15 +271,29 @@ func TestUnitConfig(t *testing.T) {
 	})
 
 	t.Run("template unit", func(t *testing.T) {
-		u := UnitConfig{
-			Name:     "myapp@",
-			Type:     "service",
-			Discover: true,
-		}
+		u := UnitConfig{Name: "myapp@", Type: "service"}
 
 		assert.True(t, u.IsTemplate())
 		assert.Equal(t, "myapp@.service", u.UnitName())
 		assert.Equal(t, "myapp@", u.TemplatePrefix())
+		assert.Empty(t, u.InstancePattern())
+		assert.True(t, u.MatchInstance("anything"))
+	})
+
+	t.Run("specific instance", func(t *testing.T) {
+		u := UnitConfig{Name: "myapp@shard0", Type: "service"}
+
+		assert.False(t, u.IsTemplate())
+		assert.Equal(t, "myapp@shard0.service", u.UnitName())
+		assert.Empty(t, u.TemplatePrefix())
+	})
+
+	t.Run("template with instance pattern", func(t *testing.T) {
+		u := UnitConfig{Name: "runtime@{app-[a-z]+[0-9]+}", Type: "service"}
+
+		assert.True(t, u.IsTemplate())
+		assert.Equal(t, "runtime@", u.TemplatePrefix())
+		assert.Equal(t, "app-[a-z]+[0-9]+", u.InstancePattern())
 	})
 
 	t.Run("resolve health checks with instance placeholder", func(t *testing.T) {
@@ -282,13 +321,12 @@ func TestUnitConfig(t *testing.T) {
 }
 
 func TestLoadTemplateConfig(t *testing.T) {
-	t.Run("template with discover", func(t *testing.T) {
+	t.Run("template with health checks", func(t *testing.T) {
 		content := `
 units:
   - name: myapp@
     type: service
     enabled: true
-    discover: true
     health_checks:
       - type: tcp
         interval: 10s
@@ -305,20 +343,7 @@ units:
 
 		u := cfg.Units[0]
 		assert.True(t, u.IsTemplate())
-		assert.True(t, u.Discover)
 		assert.Contains(t, u.HealthChecks[0].TCP.Address, "{{instance}}")
-	})
-
-	t.Run("template without discover rejected", func(t *testing.T) {
-		content := `
-units:
-  - name: myapp@
-    type: service
-    enabled: true
-`
-		_, err := loadStringConfig(content)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "requires discover")
 	})
 
 	t.Run("discovery interval default", func(t *testing.T) {
@@ -532,6 +557,56 @@ units:
 		_, err := loadStringConfig(content)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "max_delay is only allowed on timer units")
+	})
+}
+
+func TestInstancePattern(t *testing.T) {
+	t.Run("template with pattern filters instances", func(t *testing.T) {
+		content := `
+units:
+  - name: "runtime@{app-[a-z]+[0-9]+}"
+    type: service
+`
+		cfg := loadFromString(t, content)
+		u := cfg.Units[0]
+		assert.True(t, u.IsTemplate())
+		assert.Equal(t, "runtime@", u.TemplatePrefix())
+		assert.True(t, u.MatchInstance("app-web1"))
+		assert.False(t, u.MatchInstance("db-main"))
+	})
+
+	t.Run("bare template matches all", func(t *testing.T) {
+		content := `
+units:
+  - name: worker@
+    type: service
+`
+		cfg := loadFromString(t, content)
+		u := cfg.Units[0]
+		assert.True(t, u.MatchInstance("anything"))
+		assert.True(t, u.MatchInstance(""))
+	})
+
+	t.Run("empty pattern rejected", func(t *testing.T) {
+		content := `
+units:
+  - name: "worker@{}"
+    type: service
+`
+		_, err := loadStringConfig(content)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "empty instance pattern")
+	})
+
+	t.Run("invalid regex rejected", func(t *testing.T) {
+		content := `
+units:
+  - name: "worker@{[invalid}"
+    type: service
+`
+		_, err := loadStringConfig(content)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid instance pattern")
 	})
 }
 

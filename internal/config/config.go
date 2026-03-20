@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,14 +21,15 @@ type Config struct {
 
 type UnitConfig struct {
 	Name         string         `yaml:"name" validate:"required"`
-	Type         string         `yaml:"type" validate:"required,oneof=service timer"`
-	Enabled      bool           `yaml:"enabled"`
-	Discover     bool           `yaml:"discover"`
+	Type         string         `yaml:"type" validate:"omitempty,oneof=service timer"`
+	Enabled      *bool          `yaml:"enabled"`
 	DependsOn    []string       `yaml:"depends_on"`
 	GracePeriod  time.Duration  `yaml:"grace_period" validate:"omitempty,min=0s"`
 	MaxDelay     time.Duration  `yaml:"max_delay" validate:"omitempty,min=1s"`
 	HealthChecks []HealthCheck  `yaml:"health_checks" validate:"dive"`
 	Restart      *RestartPolicy `yaml:"restart" validate:"omitempty"`
+
+	instanceMatch *regexp.Regexp
 }
 
 type HealthCheck struct {
@@ -140,8 +142,23 @@ func (c *Config) Dependents(unitName string) []string {
 	return result
 }
 
+func (u *UnitConfig) IsEnabled() bool {
+	if u.Enabled == nil {
+		return true
+	}
+
+	return *u.Enabled
+}
+
 func (u *UnitConfig) IsTemplate() bool {
-	return strings.Contains(u.Name, "@")
+	idx := strings.Index(u.Name, "@")
+	if idx < 0 {
+		return false
+	}
+
+	after := u.Name[idx+1:]
+
+	return after == "" || (strings.HasPrefix(after, "{") && strings.HasSuffix(after, "}"))
 }
 
 func (u *UnitConfig) UnitName() string {
@@ -153,7 +170,32 @@ func (u *UnitConfig) TemplatePrefix() string {
 		return ""
 	}
 
-	return fmt.Sprintf("%s@", strings.TrimSuffix(u.Name, "@"))
+	idx := strings.Index(u.Name, "@")
+
+	return u.Name[:idx+1]
+}
+
+func (u *UnitConfig) InstancePattern() string {
+	if !u.IsTemplate() {
+		return ""
+	}
+
+	idx := strings.Index(u.Name, "@")
+	after := u.Name[idx+1:]
+
+	if !strings.HasPrefix(after, "{") || !strings.HasSuffix(after, "}") {
+		return ""
+	}
+
+	return after[1 : len(after)-1]
+}
+
+func (u *UnitConfig) MatchInstance(instance string) bool {
+	if u.instanceMatch == nil {
+		return true
+	}
+
+	return u.instanceMatch.MatchString(instance)
 }
 
 func (u *UnitConfig) ResolveHealthChecks(instance string) []HealthCheck {
@@ -205,7 +247,17 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
+	for i := range cfg.Units {
+		if cfg.Units[i].Type == "" {
+			cfg.Units[i].Type = "service"
+		}
+	}
+
 	if err := validator.New().Struct(cfg); err != nil {
+		return nil, fmt.Errorf("validating config: %w", err)
+	}
+
+	if err := validateUniqueUnits(cfg.Units); err != nil {
 		return nil, fmt.Errorf("validating config: %w", err)
 	}
 
@@ -224,16 +276,61 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-func validateTemplates(units []UnitConfig) error {
+func validateUniqueUnits(units []UnitConfig) error {
+	seen := make(map[string]struct{}, len(units))
+
 	for _, u := range units {
-		if u.IsTemplate() && !u.Discover {
-			return fmt.Errorf("template unit %q requires discover: true", u.Name)
+		key := u.UnitName()
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("duplicate unit %q", key)
 		}
 
-		if u.MaxDelay > 0 && u.Type != "timer" {
-			return fmt.Errorf("max_delay is only allowed on timer units, found on %q", u.Name)
+		seen[key] = struct{}{}
+	}
+
+	return nil
+}
+
+func validateTemplates(units []UnitConfig) error {
+	for i := range units {
+		if units[i].MaxDelay > 0 && units[i].Type != "timer" {
+			return fmt.Errorf("max_delay is only allowed on timer units, found on %q", units[i].Name)
+		}
+
+		if err := validateInstancePattern(&units[i]); err != nil {
+			return err
 		}
 	}
+
+	return nil
+}
+
+func validateInstancePattern(u *UnitConfig) error {
+	idx := strings.Index(u.Name, "@")
+	if idx < 0 {
+		return nil
+	}
+
+	after := u.Name[idx+1:]
+	if after == "" {
+		return nil
+	}
+
+	if !strings.HasPrefix(after, "{") || !strings.HasSuffix(after, "}") {
+		return nil
+	}
+
+	pattern := after[1 : len(after)-1]
+	if pattern == "" {
+		return fmt.Errorf("empty instance pattern in unit %q", u.Name)
+	}
+
+	re, err := regexp.Compile(fmt.Sprintf("^%s$", pattern))
+	if err != nil {
+		return fmt.Errorf("invalid instance pattern in unit %q: %w", u.Name, err)
+	}
+
+	u.instanceMatch = re
 
 	return nil
 }
@@ -313,12 +410,14 @@ func applyDefaults(u *UnitConfig) {
 		}
 	}
 
-	if u.Restart != nil {
-		if u.Restart.Backoff == 0 {
-			u.Restart.Backoff = 5 * time.Second
-		}
-		if u.Restart.Cooldown == 0 {
-			u.Restart.Cooldown = 60 * time.Second
-		}
+	if u.Restart == nil {
+		u.Restart = &RestartPolicy{Enabled: true}
+	}
+
+	if u.Restart.Backoff == 0 {
+		u.Restart.Backoff = 5 * time.Second
+	}
+	if u.Restart.Cooldown == 0 {
+		u.Restart.Cooldown = 60 * time.Second
 	}
 }

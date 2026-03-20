@@ -41,6 +41,8 @@ type mockManager struct {
 	closeCalled       bool
 }
 
+func boolPtr(b bool) *bool { return &b }
+
 func newMockManager() *mockManager {
 	return &mockManager{
 		unitStates:    make(map[string]*systemd.UnitState),
@@ -237,16 +239,11 @@ func TestHasDiscoverableUnits(t *testing.T) {
 		assert.False(t, d.hasDiscoverableUnits())
 	})
 
-	t.Run("enabled template with discover true", func(t *testing.T) {
+	t.Run("enabled template", func(t *testing.T) {
 		d := &Daemon{
 			cfg: &config.Config{
 				Units: []config.UnitConfig{
-					{
-						Name:     "myapp@",
-						Type:     "service",
-						Enabled:  true,
-						Discover: true,
-					},
+					{Name: "myapp@", Type: "service"},
 				},
 			},
 		}
@@ -254,16 +251,11 @@ func TestHasDiscoverableUnits(t *testing.T) {
 		assert.True(t, d.hasDiscoverableUnits())
 	})
 
-	t.Run("disabled template with discover true", func(t *testing.T) {
+	t.Run("disabled template", func(t *testing.T) {
 		d := &Daemon{
 			cfg: &config.Config{
 				Units: []config.UnitConfig{
-					{
-						Name:     "myapp@",
-						Type:     "service",
-						Enabled:  false,
-						Discover: true,
-					},
+					{Name: "myapp@", Type: "service", Enabled: boolPtr(false)},
 				},
 			},
 		}
@@ -271,16 +263,11 @@ func TestHasDiscoverableUnits(t *testing.T) {
 		assert.False(t, d.hasDiscoverableUnits())
 	})
 
-	t.Run("enabled non-template with discover true", func(t *testing.T) {
+	t.Run("non-template unit", func(t *testing.T) {
 		d := &Daemon{
 			cfg: &config.Config{
 				Units: []config.UnitConfig{
-					{
-						Name:     "myapp",
-						Type:     "service",
-						Enabled:  true,
-						Discover: true,
-					},
+					{Name: "myapp", Type: "service"},
 				},
 			},
 		}
@@ -288,38 +275,12 @@ func TestHasDiscoverableUnits(t *testing.T) {
 		assert.False(t, d.hasDiscoverableUnits())
 	})
 
-	t.Run("enabled template with discover false", func(t *testing.T) {
+	t.Run("mixed units with one template", func(t *testing.T) {
 		d := &Daemon{
 			cfg: &config.Config{
 				Units: []config.UnitConfig{
-					{
-						Name:     "myapp@",
-						Type:     "service",
-						Enabled:  true,
-						Discover: false,
-					},
-				},
-			},
-		}
-
-		assert.False(t, d.hasDiscoverableUnits())
-	})
-
-	t.Run("mixed units with one discoverable", func(t *testing.T) {
-		d := &Daemon{
-			cfg: &config.Config{
-				Units: []config.UnitConfig{
-					{
-						Name:    "regular",
-						Type:    "service",
-						Enabled: true,
-					},
-					{
-						Name:     "template@",
-						Type:     "service",
-						Enabled:  true,
-						Discover: true,
-					},
+					{Name: "regular", Type: "service"},
+					{Name: "template@", Type: "service"},
 				},
 			},
 		}
@@ -344,7 +305,7 @@ func TestRegisterUnit(t *testing.T) {
 		unit := &config.UnitConfig{
 			Name:    "myapp",
 			Type:    "service",
-			Enabled: true,
+			Enabled: boolPtr(true),
 		}
 
 		d.registerUnit(context.Background(), "myapp.service", unit)
@@ -367,7 +328,7 @@ func TestRegisterUnit(t *testing.T) {
 		unit := &config.UnitConfig{
 			Name:    "myapp",
 			Type:    "service",
-			Enabled: true,
+			Enabled: boolPtr(true),
 		}
 
 		d.registerUnit(context.Background(), "myapp.service", unit)
@@ -385,7 +346,7 @@ func TestRegisterUnit(t *testing.T) {
 		unit := &config.UnitConfig{
 			Name:    "myapp",
 			Type:    "service",
-			Enabled: true,
+			Enabled: boolPtr(true),
 			Restart: &config.RestartPolicy{
 				Enabled:  true,
 				Backoff:  5 * time.Second,
@@ -408,7 +369,7 @@ func TestRegisterUnit(t *testing.T) {
 		unit := &config.UnitConfig{
 			Name:    "myapp",
 			Type:    "service",
-			Enabled: true,
+			Enabled: boolPtr(true),
 		}
 
 		d.registerUnit(context.Background(), "myapp.service", unit)
@@ -430,7 +391,7 @@ func TestRegisterUnit(t *testing.T) {
 		unit := &config.UnitConfig{
 			Name:    "myapp",
 			Type:    "service",
-			Enabled: true,
+			Enabled: boolPtr(true),
 		}
 
 		d.registerUnit(context.Background(), "myapp.service", unit)
@@ -444,10 +405,10 @@ func TestRegisterUnit(t *testing.T) {
 		d := newTestDaemon(mgr, cfg)
 
 		unit := &config.UnitConfig{
-			Name:     "myapp@",
-			Type:     "service",
-			Enabled:  true,
-			Discover: true,
+			Name:    "myapp@",
+			Type:    "service",
+			Enabled: boolPtr(true),
+
 			HealthChecks: []config.HealthCheck{
 				{
 					Type:     "tcp",
@@ -477,7 +438,7 @@ func TestRegisterUnitWithGracePeriod(t *testing.T) {
 		unit := &config.UnitConfig{
 			Name:        "app",
 			Type:        "service",
-			Enabled:     true,
+			Enabled:     boolPtr(true),
 			GracePeriod: 200 * time.Millisecond,
 			HealthChecks: []config.HealthCheck{
 				{
@@ -507,7 +468,7 @@ func TestRegisterUnitWithGracePeriod(t *testing.T) {
 		unit := &config.UnitConfig{
 			Name:        "app",
 			Type:        "service",
-			Enabled:     true,
+			Enabled:     boolPtr(true),
 			GracePeriod: 100 * time.Millisecond,
 			HealthChecks: []config.HealthCheck{
 				{
@@ -545,7 +506,7 @@ func TestRegisterUnitWithGracePeriod(t *testing.T) {
 		unit := &config.UnitConfig{
 			Name:        "app",
 			Type:        "service",
-			Enabled:     true,
+			Enabled:     boolPtr(true),
 			GracePeriod: 5 * time.Second,
 			HealthChecks: []config.HealthCheck{
 				{
@@ -582,10 +543,9 @@ func TestDiscoverInstances(t *testing.T) {
 		d := newTestDaemon(mgr, cfg)
 
 		unit := &config.UnitConfig{
-			Name:     "myapp@",
-			Type:     "service",
-			Enabled:  true,
-			Discover: true,
+			Name:    "myapp@",
+			Type:    "service",
+			Enabled: boolPtr(true),
 		}
 
 		d.discoverInstances(context.Background(), unit)
@@ -607,10 +567,9 @@ func TestDiscoverInstances(t *testing.T) {
 		d := newTestDaemon(mgr, cfg)
 
 		unit := &config.UnitConfig{
-			Name:     "myapp@",
-			Type:     "service",
-			Enabled:  true,
-			Discover: true,
+			Name:    "myapp@",
+			Type:    "service",
+			Enabled: boolPtr(true),
 		}
 
 		d.discoverInstances(context.Background(), unit)
@@ -628,10 +587,9 @@ func TestDiscoverInstances(t *testing.T) {
 		d := newTestDaemon(mgr, cfg)
 
 		unit := &config.UnitConfig{
-			Name:     "myapp@",
-			Type:     "service",
-			Enabled:  true,
-			Discover: true,
+			Name:    "myapp@",
+			Type:    "service",
+			Enabled: boolPtr(true),
 		}
 
 		d.discoverInstances(context.Background(), unit)
@@ -649,10 +607,9 @@ func TestDiscoverInstances(t *testing.T) {
 		d := newTestDaemon(mgr, cfg)
 
 		unit := &config.UnitConfig{
-			Name:     "myapp@",
-			Type:     "service",
-			Enabled:  true,
-			Discover: true,
+			Name:    "myapp@",
+			Type:    "service",
+			Enabled: boolPtr(true),
 		}
 
 		d.discoverInstances(context.Background(), unit)
@@ -669,15 +626,47 @@ func TestDiscoverInstances(t *testing.T) {
 		d := newTestDaemon(mgr, cfg)
 
 		unit := &config.UnitConfig{
-			Name:     "myapp@",
-			Type:     "service",
-			Enabled:  true,
-			Discover: true,
+			Name:    "myapp@",
+			Type:    "service",
+			Enabled: boolPtr(true),
 		}
 
 		d.discoverInstances(context.Background(), unit)
 
 		assert.Empty(t, d.registeredUnits)
+	})
+
+	t.Run("filters by instance pattern", func(t *testing.T) {
+		mgr := newMockManager()
+		mgr.listResult["runtime@"] = []string{
+			"runtime@app-web1.service",
+			"runtime@app-api2.service",
+			"runtime@db-main.service",
+		}
+
+		tmpFile, err := os.CreateTemp("", "test-config-*.yaml")
+		require.NoError(t, err)
+		defer os.Remove(tmpFile.Name())
+
+		_, err = tmpFile.WriteString(`
+units:
+  - name: "runtime@{app-[a-z]+[0-9]+}"
+    type: service
+`)
+		require.NoError(t, err)
+		require.NoError(t, tmpFile.Close())
+
+		cfg, err := config.Load(tmpFile.Name())
+		require.NoError(t, err)
+
+		d := newTestDaemon(mgr, cfg)
+
+		d.discoverInstances(context.Background(), &cfg.Units[0])
+
+		assert.Contains(t, d.registeredUnits, "runtime@app-web1.service")
+		assert.Contains(t, d.registeredUnits, "runtime@app-api2.service")
+		assert.NotContains(t, d.registeredUnits, "runtime@db-main.service")
+		assert.Len(t, d.registeredUnits, 2)
 	})
 }
 
@@ -825,7 +814,7 @@ func TestEventLoop(t *testing.T) {
 		mgr := newMockManager()
 		cfg := &config.Config{
 			Units: []config.UnitConfig{
-				{Name: "test", Type: "service", Enabled: true},
+				{Name: "test", Type: "service"},
 			},
 		}
 		d := newTestDaemon(mgr, cfg)
@@ -980,7 +969,7 @@ func TestReload(t *testing.T) {
 		mgr := newMockManager()
 		cfg := &config.Config{
 			Units: []config.UnitConfig{
-				{Name: "old", Type: "service", Enabled: true},
+				{Name: "old", Type: "service"},
 			},
 		}
 		d := newTestDaemon(mgr, cfg)
@@ -1006,7 +995,7 @@ func TestReload(t *testing.T) {
 		mgr := newMockManager()
 		originalCfg := &config.Config{
 			Units: []config.UnitConfig{
-				{Name: "original", Type: "service", Enabled: true},
+				{Name: "original", Type: "service"},
 			},
 		}
 		d := newTestDaemon(mgr, originalCfg)
@@ -1022,7 +1011,7 @@ func TestReload(t *testing.T) {
 		mgr := newMockManager()
 		originalCfg := &config.Config{
 			Units: []config.UnitConfig{
-				{Name: "original", Type: "service", Enabled: true},
+				{Name: "original", Type: "service"},
 			},
 		}
 		d := newTestDaemon(mgr, originalCfg)
@@ -1046,7 +1035,7 @@ func TestReload(t *testing.T) {
 		mgr := newMockManager()
 		originalCfg := &config.Config{
 			Units: []config.UnitConfig{
-				{Name: "original", Type: "service", Enabled: true},
+				{Name: "original", Type: "service"},
 			},
 		}
 		d := newTestDaemon(mgr, originalCfg)
@@ -1064,7 +1053,7 @@ func TestHasTimerMonitoring(t *testing.T) {
 		d := &Daemon{
 			cfg: &config.Config{
 				Units: []config.UnitConfig{
-					{Name: "app", Type: "service", Enabled: true},
+					{Name: "app", Type: "service"},
 				},
 			},
 		}
@@ -1076,7 +1065,7 @@ func TestHasTimerMonitoring(t *testing.T) {
 		d := &Daemon{
 			cfg: &config.Config{
 				Units: []config.UnitConfig{
-					{Name: "backup", Type: "timer", Enabled: true},
+					{Name: "backup", Type: "timer"},
 				},
 			},
 		}
@@ -1088,7 +1077,7 @@ func TestHasTimerMonitoring(t *testing.T) {
 		d := &Daemon{
 			cfg: &config.Config{
 				Units: []config.UnitConfig{
-					{Name: "backup", Type: "timer", Enabled: true, MaxDelay: 24 * time.Hour},
+					{Name: "backup", Type: "timer", Enabled: boolPtr(true), MaxDelay: 24 * time.Hour},
 				},
 			},
 		}
@@ -1100,7 +1089,7 @@ func TestHasTimerMonitoring(t *testing.T) {
 		d := &Daemon{
 			cfg: &config.Config{
 				Units: []config.UnitConfig{
-					{Name: "backup", Type: "timer", Enabled: false, MaxDelay: 24 * time.Hour},
+					{Name: "backup", Type: "timer", Enabled: boolPtr(false), MaxDelay: 24 * time.Hour},
 				},
 			},
 		}
@@ -1116,7 +1105,7 @@ func TestCheckTimers(t *testing.T) {
 
 		cfg := &config.Config{
 			Units: []config.UnitConfig{
-				{Name: "backup", Type: "timer", Enabled: true, MaxDelay: 24 * time.Hour},
+				{Name: "backup", Type: "timer", Enabled: boolPtr(true), MaxDelay: 24 * time.Hour},
 			},
 		}
 		d := newTestDaemon(mgr, cfg)
@@ -1135,7 +1124,7 @@ func TestCheckTimers(t *testing.T) {
 
 		cfg := &config.Config{
 			Units: []config.UnitConfig{
-				{Name: "backup", Type: "timer", Enabled: true, MaxDelay: 24 * time.Hour},
+				{Name: "backup", Type: "timer", Enabled: boolPtr(true), MaxDelay: 24 * time.Hour},
 			},
 		}
 		d := newTestDaemon(mgr, cfg)
@@ -1153,7 +1142,7 @@ func TestCheckTimers(t *testing.T) {
 
 		cfg := &config.Config{
 			Units: []config.UnitConfig{
-				{Name: "backup", Type: "timer", Enabled: true, MaxDelay: 24 * time.Hour},
+				{Name: "backup", Type: "timer", Enabled: boolPtr(true), MaxDelay: 24 * time.Hour},
 			},
 		}
 		d := newTestDaemon(mgr, cfg)
@@ -1172,7 +1161,7 @@ func TestCheckTimers(t *testing.T) {
 
 		cfg := &config.Config{
 			Units: []config.UnitConfig{
-				{Name: "backup", Type: "timer", Enabled: false, MaxDelay: 24 * time.Hour},
+				{Name: "backup", Type: "timer", Enabled: boolPtr(false), MaxDelay: 24 * time.Hour},
 			},
 		}
 		d := newTestDaemon(mgr, cfg)
@@ -1191,7 +1180,7 @@ func TestCheckTimers(t *testing.T) {
 
 		cfg := &config.Config{
 			Units: []config.UnitConfig{
-				{Name: "app", Type: "service", Enabled: true},
+				{Name: "app", Type: "service"},
 			},
 		}
 		d := newTestDaemon(mgr, cfg)
@@ -1210,7 +1199,7 @@ func TestCheckTimers(t *testing.T) {
 
 		cfg := &config.Config{
 			Units: []config.UnitConfig{
-				{Name: "backup", Type: "timer", Enabled: true, MaxDelay: 24 * time.Hour},
+				{Name: "backup", Type: "timer", Enabled: boolPtr(true), MaxDelay: 24 * time.Hour},
 			},
 		}
 		d := newTestDaemon(mgr, cfg)
@@ -1230,7 +1219,7 @@ func TestCheckTimers(t *testing.T) {
 
 		cfg := &config.Config{
 			Units: []config.UnitConfig{
-				{Name: "backup", Type: "timer", Enabled: true, MaxDelay: 24 * time.Hour},
+				{Name: "backup", Type: "timer", Enabled: boolPtr(true), MaxDelay: 24 * time.Hour},
 			},
 		}
 		d := newTestDaemon(mgr, cfg)
@@ -1252,7 +1241,7 @@ func TestTimerMonitorLoop(t *testing.T) {
 		cfg := &config.Config{
 			DiscoveryInterval: 50 * time.Millisecond,
 			Units: []config.UnitConfig{
-				{Name: "backup", Type: "timer", Enabled: true, MaxDelay: 24 * time.Hour},
+				{Name: "backup", Type: "timer", Enabled: boolPtr(true), MaxDelay: 24 * time.Hour},
 			},
 		}
 		d := newTestDaemon(mgr, cfg)
@@ -1293,10 +1282,9 @@ func TestDiscoveryLoop(t *testing.T) {
 			DiscoveryInterval: 50 * time.Millisecond,
 			Units: []config.UnitConfig{
 				{
-					Name:     "myapp@",
-					Type:     "service",
-					Enabled:  true,
-					Discover: true,
+					Name:    "myapp@",
+					Type:    "service",
+					Enabled: boolPtr(true),
 				},
 			},
 		}
@@ -1328,33 +1316,14 @@ func TestDiscoveryLoop(t *testing.T) {
 		assert.Contains(t, d.registeredUnits, "myapp@inst2.service")
 	})
 
-	t.Run("skips non-discoverable units", func(t *testing.T) {
+	t.Run("skips non-template and disabled units", func(t *testing.T) {
 		mgr := newMockManager()
-		mgr.listResult["myapp@"] = []string{
-			"myapp@inst1.service",
-		}
 
 		cfg := &config.Config{
 			DiscoveryInterval: 50 * time.Millisecond,
 			Units: []config.UnitConfig{
-				{
-					Name:     "regular",
-					Type:     "service",
-					Enabled:  true,
-					Discover: false,
-				},
-				{
-					Name:     "disabled@",
-					Type:     "service",
-					Enabled:  false,
-					Discover: true,
-				},
-				{
-					Name:     "nodiscover@",
-					Type:     "service",
-					Enabled:  true,
-					Discover: false,
-				},
+				{Name: "regular", Type: "service"},
+				{Name: "disabled@", Type: "service", Enabled: boolPtr(false)},
 			},
 		}
 		d := newTestDaemon(mgr, cfg)

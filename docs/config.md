@@ -33,10 +33,9 @@ Each entry in the `units` list defines a systemd unit to supervise.
 
 | Option          | Type     | Required | Default | Description                                                |
 |-----------------|----------|----------|---------|------------------------------------------------------------|
-| `name`          | string   | Yes      | --      | Unit name without the `.service`/`.timer` suffix. For template discovery, use `name@`. For specific instances, use `name@instance`. |
-| `type`          | string   | Yes      | --      | One of: `service`, `timer`.                                |
-| `enabled`       | bool     | No       | `false` | Whether this unit is actively supervised.                  |
-| `discover`      | bool     | No       | `false` | Auto-discover running instances of template units. Required for template units (name ending with `@`). |
+| `name`          | string   | Yes      | --      | Unit name without the `.service`/`.timer` suffix. Names ending with `@` are auto-discovered as template units. Use `name@{regex}` to filter instances by pattern. For specific instances, use `name@instance`. |
+| `type`          | string   | No       | `service` | One of: `service`, `timer`.                              |
+| `enabled`       | bool     | No       | `true`  | Whether this unit is actively supervised.                  |
 | `depends_on`    | list     | No       | --      | Unit names that must start before this unit.               |
 | `grace_period`  | duration | No       | `0s`    | Delay before health checks begin. Useful for slow-starting services. |
 | `max_delay`     | duration | No       | --      | Maximum allowed time since last timer trigger. Timer-only. If exceeded, the timer is restarted. Minimum: `1s`. |
@@ -102,17 +101,27 @@ units:
 
 ### Auto-Discovery
 
-For dynamic instances, use `discover: true` on a template name (ending with `@`) to automatically find running instances:
+Unit names ending with `@` are automatically treated as template units. The daemon discovers all running instances matching the template:
 
 ```yaml
 units:
   - name: worker@
     type: service
-    enabled: true
-    discover: true
 ```
 
-The daemon scans for running `worker@*.service` instances every `discovery_interval`. New instances are picked up automatically; removed instances are unregistered.
+The daemon scans for running `worker@*.service` instances every `discovery_interval`. New instances are picked up automatically.
+
+### Instance Pattern Filtering
+
+Use `name@{regex}` to restrict discovery to instances matching a regular expression. The regex is matched against the full instance name:
+
+```yaml
+units:
+  - name: "runtime@{app-[a-z]+[0-9]+}"
+    type: service
+```
+
+This discovers only instances like `runtime@app-web1.service` or `runtime@app-api2.service`, ignoring `runtime@db-main.service`.
 
 ### Dependencies
 
@@ -259,8 +268,6 @@ For discovered template units, use `{{instance}}` in health check addresses. It 
 units:
   - name: worker@
     type: service
-    enabled: true
-    discover: true
     health_checks:
       - type: http
         interval: 10s
@@ -278,7 +285,7 @@ Controls automatic restart behavior for unhealthy units. Restart uses exponentia
 
 | Option     | Type     | Required | Default | Description                                             |
 |------------|----------|----------|---------|---------------------------------------------------------|
-| `enabled`  | bool     | No       | `false` | Enable automatic restart.                               |
+| `enabled`  | bool     | No       | `true`  | Enable automatic restart.                               |
 | `backoff`  | duration | No       | `5s`    | Initial delay between restart attempts. Minimum: `1s`.  |
 | `cooldown` | duration | No       | `60s`   | Minimum time between restart cycles. Minimum: `1s`.     |
 

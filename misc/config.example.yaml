@@ -75,12 +75,11 @@ units:
       cooldown: 60s
 
   # Template unit with auto-discovery
+  # Names ending with @ are auto-discovered
   # Finds all running worker@*.service instances automatically
   # New instances are picked up every discovery_interval
   - name: worker@
     type: service
-    enabled: true
-    discover: true
     health_checks:
       - type: http
         interval: 10s
@@ -92,6 +91,12 @@ units:
       enabled: true
       backoff: 10s
       cooldown: 120s
+
+  # Template with instance pattern filter
+  # Only discovers instances matching the regex inside {}
+  # e.g. runtime@app-web1.service matches, runtime@db-main.service does not
+  - name: "runtime@{app-[a-z]+[0-9]+}"
+    type: service
 
   # Unit with script-based health check
   # Script must exit 0 for healthy, non-zero for unhealthy

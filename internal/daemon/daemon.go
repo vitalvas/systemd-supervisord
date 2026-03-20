@@ -81,7 +81,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	for i := range cfg.Units {
 		unit := &cfg.Units[i]
-		if !unit.Enabled {
+		if !unit.IsEnabled() {
 			continue
 		}
 
@@ -192,13 +192,18 @@ func (d *Daemon) discoverInstances(ctx context.Context, unit *config.UnitConfig)
 			continue
 		}
 
+		instance := extractInstance(name, prefix, unit.Type)
+		if !unit.MatchInstance(instance) {
+			continue
+		}
+
 		d.registerUnit(ctx, name, unit)
 	}
 }
 
 func (d *Daemon) hasDiscoverableUnits() bool {
 	for i := range d.cfg.Units {
-		if d.cfg.Units[i].Enabled && d.cfg.Units[i].IsTemplate() && d.cfg.Units[i].Discover {
+		if d.cfg.Units[i].IsEnabled() && d.cfg.Units[i].IsTemplate() {
 			return true
 		}
 	}
@@ -217,7 +222,7 @@ func (d *Daemon) discoveryLoop(ctx context.Context) {
 		case <-ticker.C:
 			for i := range d.cfg.Units {
 				unit := &d.cfg.Units[i]
-				if !unit.Enabled || !unit.IsTemplate() || !unit.Discover {
+				if !unit.IsEnabled() || !unit.IsTemplate() {
 					continue
 				}
 
@@ -229,7 +234,7 @@ func (d *Daemon) discoveryLoop(ctx context.Context) {
 
 func (d *Daemon) hasTimerMonitoring() bool {
 	for i := range d.cfg.Units {
-		if d.cfg.Units[i].Enabled && d.cfg.Units[i].Type == "timer" && d.cfg.Units[i].MaxDelay > 0 {
+		if d.cfg.Units[i].IsEnabled() && d.cfg.Units[i].Type == "timer" && d.cfg.Units[i].MaxDelay > 0 {
 			return true
 		}
 	}
@@ -259,7 +264,7 @@ func (d *Daemon) timerMonitorLoop(ctx context.Context) {
 func (d *Daemon) checkTimers(ctx context.Context) {
 	for i := range d.cfg.Units {
 		unit := &d.cfg.Units[i]
-		if !unit.Enabled || unit.Type != "timer" || unit.MaxDelay == 0 {
+		if !unit.IsEnabled() || unit.Type != "timer" || unit.MaxDelay == 0 {
 			continue
 		}
 
