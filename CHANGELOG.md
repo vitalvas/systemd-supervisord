@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/vitalvas/systemd-supervisord/compare/v0.2.2...v0.2.3) (2026-03-20)
+
+
+### Bug Fixes
+
+* report initial healthy state from health checker ([240ff9a](https://github.com/vitalvas/systemd-supervisord/commit/240ff9ae4b5f2f41d5f18ce66480afedf859a26d))
+
 ## [0.2.2](https://github.com/vitalvas/systemd-supervisord/compare/v0.2.1...v0.2.2) (2026-03-20)
 
 
