@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0](https://github.com/vitalvas/systemd-supervisord/compare/v0.1.0...v0.2.0) (2026-03-20)
+
+
+### Features
+
+* add dry-run mode and fix multiple daemon bugs ([87b2b09](https://github.com/vitalvas/systemd-supervisord/commit/87b2b09b550294eaaa2113131e9c1d444dbe590f))
+* add priority-based unit startup ordering ([c56fecc](https://github.com/vitalvas/systemd-supervisord/commit/c56fecc9fe8b73dfdb9e949e1f49040135274665))
+* add systemd socket activation support ([ebf2b6d](https://github.com/vitalvas/systemd-supervisord/commit/ebf2b6d87a85024623c3932dc8546a6789726062))
+* change units config from YAML list to map keyed by name.type ([87b9279](https://github.com/vitalvas/systemd-supervisord/commit/87b92791079531a8b41a4d139d1390f88593b98b))
+* improve config defaults and add instance pattern filtering ([3cc8219](https://github.com/vitalvas/systemd-supervisord/commit/3cc8219821848a1462f896f0cb71eaf6850bbf72))
+
 ## [0.1.0](https://github.com/vitalvas/systemd-supervisord/compare/v0.0.1...v0.1.0) (2026-03-20)
 
 
