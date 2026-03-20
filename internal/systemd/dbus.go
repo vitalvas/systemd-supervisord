@@ -22,6 +22,12 @@ func NewDBusManager(ctx context.Context) (*DBusManager, error) {
 		return nil, fmt.Errorf("connecting to system D-Bus: %w", err)
 	}
 
+	if err := conn.Subscribe(); err != nil {
+		conn.Close()
+
+		return nil, fmt.Errorf("subscribing to D-Bus signals: %w", err)
+	}
+
 	return &DBusManager{conn: conn}, nil
 }
 
@@ -148,10 +154,6 @@ func (m *DBusManager) ListUnits(ctx context.Context, prefix string) ([]string, e
 func (m *DBusManager) WatchUnit(ctx context.Context, unit string, ch chan<- StateChange) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	if err := m.conn.Subscribe(); err != nil {
-		return fmt.Errorf("subscribing to D-Bus signals: %w", err)
-	}
 
 	evCh, errCh := m.conn.SubscribeUnitsCustomContext(ctx, 1*time.Second, 0, func(u1, _ *dbus.UnitStatus) bool {
 		return u1.Name == unit

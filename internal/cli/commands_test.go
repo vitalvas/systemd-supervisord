@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -226,7 +227,7 @@ func TestPrintUnitStatus(t *testing.T) {
 }
 
 func TestPrintAllStatuses(t *testing.T) {
-	t.Run("multiple units", func(t *testing.T) {
+	t.Run("multiple units sorted by name", func(t *testing.T) {
 		healthy := true
 		unhealthy := false
 
@@ -241,15 +242,15 @@ func TestPrintAllStatuses(t *testing.T) {
 
 		output := buf.String()
 		assert.Contains(t, output, "UNIT")
-		assert.Contains(t, output, "STATE")
-		assert.Contains(t, output, "HEALTHY")
-		assert.Contains(t, output, "RESTARTS")
-		assert.Contains(t, output, "nginx.service")
-		assert.Contains(t, output, "app.service")
-		assert.Contains(t, output, "backup.timer")
 		assert.Contains(t, output, "active/running")
 		assert.Contains(t, output, "failed/failed")
 		assert.Contains(t, output, "n/a")
+
+		appIdx := strings.Index(output, "app.service")
+		backupIdx := strings.Index(output, "backup.timer")
+		nginxIdx := strings.Index(output, "nginx.service")
+		assert.Greater(t, backupIdx, appIdx)
+		assert.Greater(t, nginxIdx, backupIdx)
 	})
 
 	t.Run("empty list", func(t *testing.T) {

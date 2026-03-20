@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sort"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -174,6 +175,8 @@ func PrintUnitList(w io.Writer, data interface{}) error {
 		return err
 	}
 
+	sort.Strings(units)
+
 	for _, name := range units {
 		fmt.Fprintln(w, name)
 	}
@@ -222,6 +225,10 @@ func PrintAllStatuses(w io.Writer, data interface{}) error {
 	if err := json.Unmarshal(raw, &statuses); err != nil {
 		return err
 	}
+
+	sort.Slice(statuses, func(i, j int) bool {
+		return statuses[i].UnitName < statuses[j].UnitName
+	})
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 
