@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/vitalvas/systemd-supervisord/compare/v0.2.0...v0.2.1) (2026-03-20)
+
+
+### Bug Fixes
+
+* remove unused slog import from dbus.go ([265ec1d](https://github.com/vitalvas/systemd-supervisord/commit/265ec1dd5705fbc52d9c13a0050e1e4c2f408143))
+* resolve 100% CPU usage from D-Bus subscription polling interval ([7140498](https://github.com/vitalvas/systemd-supervisord/commit/7140498db6f45c08027400a01f6438bcc2105a1a))
+
 ## [0.2.0](https://github.com/vitalvas/systemd-supervisord/compare/v0.1.0...v0.2.0) (2026-03-20)
 
 
