@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/vitalvas/systemd-supervisord/compare/v0.2.4...v0.3.0) (2026-05-21)
+
+
+### Features
+
+* add HTTP health endpoint for external probes ([ae4a108](https://github.com/vitalvas/systemd-supervisord/commit/ae4a1089bc818e547a3a2ed22c8ae8cad2ec5e45))
+
 ## [0.2.4](https://github.com/vitalvas/systemd-supervisord/compare/v0.2.3...v0.2.4) (2026-03-20)
 
 
