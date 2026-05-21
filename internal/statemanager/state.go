@@ -146,7 +146,7 @@ func (sm *StateManager) GetStatus(unit string) *UnitStatus {
 	return &cp
 }
 
-func (sm *StateManager) GetAllStatuses() []UnitStatus {
+func (sm *StateManager) AllStatuses() []UnitStatus {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 

@@ -25,16 +25,16 @@ func TestProcessDBusEvents(t *testing.T) {
 		evCh <- map[string]*dbus.UnitStatus{
 			"nginx.service": {
 				Name:        "nginx.service",
-				ActiveState: "active",
-				SubState:    "running",
+				ActiveState: ActiveStateActive,
+				SubState:    SubStateRunning,
 			},
 		}
 
 		select {
 		case change := <-ch:
 			assert.Equal(t, "nginx.service", change.UnitName)
-			assert.Equal(t, "active", change.ActiveState)
-			assert.Equal(t, "running", change.SubState)
+			assert.Equal(t, ActiveStateActive, change.ActiveState)
+			assert.Equal(t, SubStateRunning, change.SubState)
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for state change")
 		}
@@ -54,8 +54,8 @@ func TestProcessDBusEvents(t *testing.T) {
 			"removed.service": nil,
 			"nginx.service": {
 				Name:        "nginx.service",
-				ActiveState: "active",
-				SubState:    "running",
+				ActiveState: ActiveStateActive,
+				SubState:    SubStateRunning,
 			},
 		}
 
@@ -167,10 +167,18 @@ func TestProcessDBusEvents(t *testing.T) {
 		go processDBusEvents(ctx, evCh, errCh, ch)
 
 		evCh <- map[string]*dbus.UnitStatus{
-			"a.service": {Name: "a.service", ActiveState: "active", SubState: "running"},
+			"a.service": {
+				Name:        "a.service",
+				ActiveState: ActiveStateActive,
+				SubState:    SubStateRunning,
+			},
 		}
 		evCh <- map[string]*dbus.UnitStatus{
-			"b.service": {Name: "b.service", ActiveState: "failed", SubState: "failed"},
+			"b.service": {
+				Name:        "b.service",
+				ActiveState: ActiveStateFailed,
+				SubState:    SubStateFailed,
+			},
 		}
 
 		var changes []StateChange

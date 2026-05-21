@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/vitalvas/systemd-supervisord/internal/daemon"
 	"github.com/vitalvas/systemd-supervisord/internal/statemanager"
+	"github.com/vitalvas/systemd-supervisord/internal/systemd"
 )
 
 func startMockDaemon(t *testing.T, handler func(req daemon.Request) daemon.Response) string {
@@ -192,8 +193,8 @@ func TestPrintUnitStatus(t *testing.T) {
 		healthy := true
 		status := statemanager.UnitStatus{
 			UnitName:       "nginx.service",
-			ActiveState:    "active",
-			SubState:       "running",
+			ActiveState:    systemd.ActiveStateActive,
+			SubState:       systemd.SubStateRunning,
 			Healthy:        &healthy,
 			RestartCount:   2,
 			LastTransition: time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC),
@@ -213,8 +214,8 @@ func TestPrintUnitStatus(t *testing.T) {
 	t.Run("without health check", func(t *testing.T) {
 		status := statemanager.UnitStatus{
 			UnitName:    "backup.timer",
-			ActiveState: "active",
-			SubState:    "waiting",
+			ActiveState: systemd.ActiveStateActive,
+			SubState:    systemd.SubStateWaiting,
 		}
 
 		buf := new(bytes.Buffer)
@@ -232,9 +233,25 @@ func TestPrintAllStatuses(t *testing.T) {
 		unhealthy := false
 
 		statuses := []statemanager.UnitStatus{
-			{UnitName: "nginx.service", ActiveState: "active", SubState: "running", Healthy: &healthy, RestartCount: 0},
-			{UnitName: "app.service", ActiveState: "failed", SubState: "failed", Healthy: &unhealthy, RestartCount: 3},
-			{UnitName: "backup.timer", ActiveState: "active", SubState: "waiting"},
+			{
+				UnitName:     "nginx.service",
+				ActiveState:  systemd.ActiveStateActive,
+				SubState:     systemd.SubStateRunning,
+				Healthy:      &healthy,
+				RestartCount: 0,
+			},
+			{
+				UnitName:     "app.service",
+				ActiveState:  systemd.ActiveStateFailed,
+				SubState:     systemd.SubStateFailed,
+				Healthy:      &unhealthy,
+				RestartCount: 3,
+			},
+			{
+				UnitName:    "backup.timer",
+				ActiveState: systemd.ActiveStateActive,
+				SubState:    systemd.SubStateWaiting,
+			},
 		}
 
 		buf := new(bytes.Buffer)
@@ -266,8 +283,19 @@ func TestStatusCmd(t *testing.T) {
 	t.Run("all units", func(t *testing.T) {
 		healthy := true
 		statuses := []statemanager.UnitStatus{
-			{UnitName: "nginx.service", ActiveState: "active", SubState: "running", Healthy: &healthy, RestartCount: 0},
-			{UnitName: "app.service", ActiveState: "active", SubState: "running", RestartCount: 1},
+			{
+				UnitName:     "nginx.service",
+				ActiveState:  systemd.ActiveStateActive,
+				SubState:     systemd.SubStateRunning,
+				Healthy:      &healthy,
+				RestartCount: 0,
+			},
+			{
+				UnitName:     "app.service",
+				ActiveState:  systemd.ActiveStateActive,
+				SubState:     systemd.SubStateRunning,
+				RestartCount: 1,
+			},
 		}
 
 		socketPath := startMockDaemon(t, func(req daemon.Request) daemon.Response {
@@ -296,8 +324,8 @@ func TestStatusCmd(t *testing.T) {
 		healthy := true
 		status := statemanager.UnitStatus{
 			UnitName:       "nginx.service",
-			ActiveState:    "active",
-			SubState:       "running",
+			ActiveState:    systemd.ActiveStateActive,
+			SubState:       systemd.SubStateRunning,
 			Healthy:        &healthy,
 			RestartCount:   2,
 			LastTransition: time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC),

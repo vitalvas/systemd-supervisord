@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/vitalvas/systemd-supervisord/internal/config"
 	"github.com/vitalvas/systemd-supervisord/internal/statemanager"
+	"github.com/vitalvas/systemd-supervisord/internal/systemd"
 )
 
 func TestNotifier(t *testing.T) {
@@ -46,8 +47,8 @@ func TestNotifier(t *testing.T) {
 		n.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "nginx.service",
-			ActiveState: "failed",
-			SubState:    "failed",
+			ActiveState: systemd.ActiveStateFailed,
+			SubState:    systemd.SubStateFailed,
 			Timestamp:   ts,
 		})
 
@@ -55,7 +56,7 @@ func TestNotifier(t *testing.T) {
 		case received := <-receivedCh:
 			assert.Equal(t, "state_changed", received.EventType)
 			assert.Equal(t, "nginx.service", received.UnitName)
-			assert.Equal(t, "failed", received.ActiveState)
+			assert.Equal(t, systemd.ActiveStateFailed, received.ActiveState)
 			assert.Equal(t, "2026-01-15T10:00:00Z", received.Timestamp)
 		case <-time.After(5 * time.Second):
 			t.Fatal("timed out waiting for webhook")
@@ -89,8 +90,8 @@ func TestNotifier(t *testing.T) {
 		n.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "nginx.service",
-			ActiveState: "failed",
-			SubState:    "failed",
+			ActiveState: systemd.ActiveStateFailed,
+			SubState:    systemd.SubStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -184,8 +185,8 @@ func TestNotifier(t *testing.T) {
 		n.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "active",
-			SubState:    "running",
+			ActiveState: systemd.ActiveStateActive,
+			SubState:    systemd.SubStateRunning,
 			Timestamp:   time.Now(),
 		})
 
@@ -220,8 +221,8 @@ func TestNotifier(t *testing.T) {
 		n.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "failed",
-			SubState:    "failed",
+			ActiveState: systemd.ActiveStateFailed,
+			SubState:    systemd.SubStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -272,8 +273,8 @@ func TestNotifier(t *testing.T) {
 		n.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "active",
-			SubState:    "running",
+			ActiveState: systemd.ActiveStateActive,
+			SubState:    systemd.SubStateRunning,
 			Timestamp:   time.Now(),
 		})
 
@@ -312,8 +313,8 @@ func TestNotifier(t *testing.T) {
 		n.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "failed",
-			SubState:    "failed",
+			ActiveState: systemd.ActiveStateFailed,
+			SubState:    systemd.SubStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -334,8 +335,8 @@ func TestNotifier(t *testing.T) {
 		n.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "failed",
-			SubState:    "failed",
+			ActiveState: systemd.ActiveStateFailed,
+			SubState:    systemd.SubStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -360,8 +361,8 @@ func TestNotifier(t *testing.T) {
 		n.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "failed",
-			SubState:    "failed",
+			ActiveState: systemd.ActiveStateFailed,
+			SubState:    systemd.SubStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -397,8 +398,8 @@ func TestNotifierScript(t *testing.T) {
 		n.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "test.service",
-			ActiveState: "failed",
-			SubState:    "failed",
+			ActiveState: systemd.ActiveStateFailed,
+			SubState:    systemd.SubStateFailed,
 			Timestamp:   time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC),
 		})
 
@@ -442,8 +443,8 @@ func TestNotifierScript(t *testing.T) {
 		n.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "test.service",
-			ActiveState: "failed",
-			SubState:    "failed",
+			ActiveState: systemd.ActiveStateFailed,
+			SubState:    systemd.SubStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -522,8 +523,8 @@ func TestNotifierScript(t *testing.T) {
 		n.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "failed",
-			SubState:    "failed",
+			ActiveState: systemd.ActiveStateFailed,
+			SubState:    systemd.SubStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -552,8 +553,8 @@ func TestNotifierScript(t *testing.T) {
 		n.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "failed",
-			SubState:    "failed",
+			ActiveState: systemd.ActiveStateFailed,
+			SubState:    systemd.SubStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -586,8 +587,8 @@ func TestNotifierExec(t *testing.T) {
 		n.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "test.service",
-			ActiveState: "failed",
-			SubState:    "failed",
+			ActiveState: systemd.ActiveStateFailed,
+			SubState:    systemd.SubStateFailed,
 			Timestamp:   time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC),
 		})
 
@@ -625,8 +626,8 @@ func TestNotifierExec(t *testing.T) {
 		n.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "test.service",
-			ActiveState: "failed",
-			SubState:    "failed",
+			ActiveState: systemd.ActiveStateFailed,
+			SubState:    systemd.SubStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -663,8 +664,8 @@ func TestNotifierExec(t *testing.T) {
 		n.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "test.service",
-			ActiveState: "failed",
-			SubState:    "failed",
+			ActiveState: systemd.ActiveStateFailed,
+			SubState:    systemd.SubStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -708,8 +709,8 @@ func TestNotifierExec(t *testing.T) {
 		n.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "failed",
-			SubState:    "failed",
+			ActiveState: systemd.ActiveStateFailed,
+			SubState:    systemd.SubStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -733,8 +734,8 @@ func TestNotifierExec(t *testing.T) {
 		n.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "failed",
-			SubState:    "failed",
+			ActiveState: systemd.ActiveStateFailed,
+			SubState:    systemd.SubStateFailed,
 			Timestamp:   time.Now(),
 		})
 

@@ -78,8 +78,8 @@ func (r *Restarter) shouldRestart(ev statemanager.Event) bool {
 
 	switch ev.Type {
 	case statemanager.EventStateChanged:
-		if ev.ActiveState != "failed" {
-			if ev.ActiveState == "active" {
+		if ev.ActiveState != systemd.ActiveStateFailed {
+			if ev.ActiveState == systemd.ActiveStateActive {
 				tracker.attempts = 0
 				tracker.cooldownUntil = time.Time{}
 

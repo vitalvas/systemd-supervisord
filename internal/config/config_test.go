@@ -649,7 +649,7 @@ units:
   low.service:
     priority: 100
   high.service:
-    priority: 0
+    priority: 1
   mid.service:
     priority: 50
 `
@@ -670,9 +670,20 @@ units:
 		cfg := loadFromString(t, content)
 		require.Len(t, cfg.Units, 2)
 		assert.Equal(t, "explicit", cfg.Units[0].Name)
-		assert.Equal(t, 10, cfg.Units[0].GetPriority())
+		assert.Equal(t, 10, cfg.Units[0].Priority)
 		assert.Equal(t, "default", cfg.Units[1].Name)
-		assert.Equal(t, 999, cfg.Units[1].GetPriority())
+		assert.Equal(t, 999, cfg.Units[1].Priority)
+	})
+
+	t.Run("priority 0 uses default", func(t *testing.T) {
+		content := `
+units:
+  zero.service:
+    priority: 0
+`
+		cfg := loadFromString(t, content)
+		require.Len(t, cfg.Units, 1)
+		assert.Equal(t, 999, cfg.Units[0].Priority)
 	})
 
 	t.Run("stable sort preserves order for same priority", func(t *testing.T) {
@@ -697,7 +708,7 @@ units:
 `
 		_, err := loadStringConfig(content)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "bad.service: priority must be at least 0")
+		assert.Contains(t, err.Error(), "bad.service: priority must be at least 1")
 	})
 }
 
@@ -902,6 +913,123 @@ units:
 		cfg := loadFromString(t, content)
 		deps := cfg.Dependents("app")
 		assert.Nil(t, deps)
+	})
+}
+
+func TestHTTPConfig(t *testing.T) {
+	t.Run("disabled by default", func(t *testing.T) {
+		content := `
+units:
+  app.service:
+    enabled: true
+`
+		cfg := loadFromString(t, content)
+		assert.False(t, cfg.HTTP.Enabled())
+		assert.Empty(t, cfg.HTTP.Listen)
+	})
+
+	t.Run("listen set applies defaults", func(t *testing.T) {
+		content := `
+http:
+  listen: 0.0.0.0:8080
+units:
+  app.service:
+    enabled: true
+`
+		cfg := loadFromString(t, content)
+		assert.True(t, cfg.HTTP.Enabled())
+		assert.Equal(t, "0.0.0.0:8080", cfg.HTTP.Listen)
+		assert.Equal(t, 5*time.Second, cfg.HTTP.ReadTimeout)
+		assert.Equal(t, 5*time.Second, cfg.HTTP.WriteTimeout)
+		assert.Equal(t, 5*time.Second, cfg.HTTP.ShutdownTimeout)
+	})
+
+	t.Run("custom timeouts retained", func(t *testing.T) {
+		content := `
+http:
+  listen: 127.0.0.1:9090
+  read_timeout: 10s
+  write_timeout: 15s
+  shutdown_timeout: 20s
+units:
+  app.service:
+    enabled: true
+`
+		cfg := loadFromString(t, content)
+		assert.Equal(t, 10*time.Second, cfg.HTTP.ReadTimeout)
+		assert.Equal(t, 15*time.Second, cfg.HTTP.WriteTimeout)
+		assert.Equal(t, 20*time.Second, cfg.HTTP.ShutdownTimeout)
+	})
+
+	t.Run("invalid listen rejected", func(t *testing.T) {
+		content := `
+http:
+  listen: "not a host:port"
+units:
+  app.service:
+    enabled: true
+`
+		_, err := loadStringConfig(content)
+		require.Error(t, err)
+	})
+
+	t.Run("host without port gets default 9999", func(t *testing.T) {
+		content := `
+http:
+  listen: 0.0.0.0
+units:
+  app.service:
+    enabled: true
+`
+		cfg := loadFromString(t, content)
+		assert.Equal(t, "0.0.0.0:9999", cfg.HTTP.Listen)
+	})
+
+	t.Run("host with empty port gets default 9999", func(t *testing.T) {
+		content := `
+http:
+  listen: "127.0.0.1:"
+units:
+  app.service:
+    enabled: true
+`
+		cfg := loadFromString(t, content)
+		assert.Equal(t, "127.0.0.1:9999", cfg.HTTP.Listen)
+	})
+
+	t.Run("explicit port preserved", func(t *testing.T) {
+		content := `
+http:
+  listen: "0.0.0.0:8080"
+units:
+  app.service:
+    enabled: true
+`
+		cfg := loadFromString(t, content)
+		assert.Equal(t, "0.0.0.0:8080", cfg.HTTP.Listen)
+	})
+}
+
+func TestUnitCritical(t *testing.T) {
+	t.Run("defaults to false", func(t *testing.T) {
+		content := `
+units:
+  app.service:
+    enabled: true
+`
+		cfg := loadFromString(t, content)
+		assert.False(t, cfg.Units[0].Critical)
+	})
+
+	t.Run("critical true parsed", func(t *testing.T) {
+		content := `
+units:
+  app.service:
+    enabled: true
+    critical: true
+`
+		cfg := loadFromString(t, content)
+		assert.True(t, cfg.Units[0].Critical)
 	})
 }
 

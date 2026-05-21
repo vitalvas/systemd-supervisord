@@ -92,8 +92,8 @@ func (m *mockManager) GetUnitState(_ context.Context, unit string) (*systemd.Uni
 	if !ok {
 		return &systemd.UnitState{
 			Name:        unit,
-			ActiveState: "inactive",
-			SubState:    "dead",
+			ActiveState: systemd.ActiveStateInactive,
+			SubState:    systemd.SubStateDead,
 			LoadState:   "loaded",
 		}, nil
 	}
@@ -162,6 +162,7 @@ func newTestDaemon(mgr systemd.Manager, cfg *config.Config) *Daemon {
 		changeCh:          make(chan systemd.StateChange, 100),
 		healthCh:          make(chan healthcheck.Result, 100),
 		registeredUnits:   make(map[string]struct{}),
+		criticalUnits:     make(map[string]struct{}),
 		unitCancels:       make(map[string]context.CancelFunc),
 		discoveryReloadCh: make(chan struct{}, 1),
 		timerReloadCh:     make(chan struct{}, 1),
@@ -328,13 +329,32 @@ func TestHasDiscoverableUnits(t *testing.T) {
 	})
 }
 
+func TestCriticalUnits(t *testing.T) {
+	t.Run("returns empty when no critical units", func(t *testing.T) {
+		d := newTestDaemon(newMockManager(), &config.Config{})
+
+		assert.Empty(t, d.CriticalUnits())
+	})
+
+	t.Run("returns registered critical units", func(t *testing.T) {
+		d := newTestDaemon(newMockManager(), &config.Config{})
+
+		d.mu.Lock()
+		d.criticalUnits["app.service"] = struct{}{}
+		d.criticalUnits["db.service"] = struct{}{}
+		d.mu.Unlock()
+
+		assert.ElementsMatch(t, []string{"app.service", "db.service"}, d.CriticalUnits())
+	})
+}
+
 func TestRegisterUnit(t *testing.T) {
 	t.Run("registers new unit with state fetch", func(t *testing.T) {
 		mgr := newMockManager()
 		mgr.unitStates["myapp.service"] = &systemd.UnitState{
 			Name:        "myapp.service",
-			ActiveState: "active",
-			SubState:    "running",
+			ActiveState: systemd.ActiveStateActive,
+			SubState:    systemd.SubStateRunning,
 			LoadState:   "loaded",
 		}
 
@@ -355,8 +375,8 @@ func TestRegisterUnit(t *testing.T) {
 
 		status := d.sm.GetStatus("myapp.service")
 		require.NotNil(t, status)
-		assert.Equal(t, "active", status.ActiveState)
-		assert.Equal(t, "running", status.SubState)
+		assert.Equal(t, systemd.ActiveStateActive, status.ActiveState)
+		assert.Equal(t, systemd.SubStateRunning, status.SubState)
 	})
 
 	t.Run("idempotent registration", func(t *testing.T) {
@@ -750,13 +770,13 @@ func TestEventLoop(t *testing.T) {
 
 		d.changeCh <- systemd.StateChange{
 			UnitName:    "test.service",
-			ActiveState: "active",
-			SubState:    "running",
+			ActiveState: systemd.ActiveStateActive,
+			SubState:    systemd.SubStateRunning,
 		}
 
 		require.Eventually(t, func() bool {
 			status := d.sm.GetStatus("test.service")
-			return status != nil && status.ActiveState == "active" && status.SubState == "running"
+			return status != nil && status.ActiveState == systemd.ActiveStateActive && status.SubState == systemd.SubStateRunning
 		}, 2*time.Second, 10*time.Millisecond)
 
 		cancel()

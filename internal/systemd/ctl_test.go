@@ -205,8 +205,8 @@ exit 0
 		state, err := mgr.GetUnitState(context.Background(), "test.service")
 		require.NoError(t, err)
 		assert.Equal(t, "test.service", state.Name)
-		assert.Equal(t, "active", state.ActiveState)
-		assert.Equal(t, "running", state.SubState)
+		assert.Equal(t, ActiveStateActive, state.ActiveState)
+		assert.Equal(t, SubStateRunning, state.SubState)
 		assert.Equal(t, "loaded", state.LoadState)
 	})
 
@@ -221,8 +221,8 @@ exit 0
 		mgr := NewCtlManager()
 		state, err := mgr.GetUnitState(context.Background(), "stopped.service")
 		require.NoError(t, err)
-		assert.Equal(t, "inactive", state.ActiveState)
-		assert.Equal(t, "dead", state.SubState)
+		assert.Equal(t, ActiveStateInactive, state.ActiveState)
+		assert.Equal(t, SubStateDead, state.SubState)
 	})
 
 	t.Run("failure", func(t *testing.T) {
@@ -378,14 +378,14 @@ exit 0
 		// First state change: active/running
 		change1 := <-ch
 		assert.Equal(t, "test.service", change1.UnitName)
-		assert.Equal(t, "active", change1.ActiveState)
-		assert.Equal(t, "running", change1.SubState)
+		assert.Equal(t, ActiveStateActive, change1.ActiveState)
+		assert.Equal(t, SubStateRunning, change1.SubState)
 
 		// Second state change: failed/failed
 		change2 := <-ch
 		assert.Equal(t, "test.service", change2.UnitName)
-		assert.Equal(t, "failed", change2.ActiveState)
-		assert.Equal(t, "failed", change2.SubState)
+		assert.Equal(t, ActiveStateFailed, change2.ActiveState)
+		assert.Equal(t, SubStateFailed, change2.SubState)
 
 		cancel()
 	})
@@ -413,7 +413,7 @@ exit 0
 		// Should get exactly one event (first detection)
 		select {
 		case change := <-ch:
-			assert.Equal(t, "active", change.ActiveState)
+			assert.Equal(t, ActiveStateActive, change.ActiveState)
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for first state change")
 		}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/vitalvas/systemd-supervisord/internal/config"
 	"github.com/vitalvas/systemd-supervisord/internal/healthcheck"
+	"github.com/vitalvas/systemd-supervisord/internal/httphealth"
 	"github.com/vitalvas/systemd-supervisord/internal/notify"
 	"github.com/vitalvas/systemd-supervisord/internal/restarter"
 	"github.com/vitalvas/systemd-supervisord/internal/statemanager"
@@ -29,12 +30,14 @@ type Daemon struct {
 	notifier   *notify.Notifier
 	restarter  *restarter.Restarter
 	sdNotifier *systemd.Notifier
+	httpServer *httphealth.Server
 	cancel     context.CancelFunc
 
 	changeCh chan systemd.StateChange
 	healthCh chan healthcheck.Result
 
 	registeredUnits   map[string]struct{}
+	criticalUnits     map[string]struct{}
 	unitCancels       map[string]context.CancelFunc
 	discoveryReloadCh chan struct{}
 	timerReloadCh     chan struct{}
@@ -48,6 +51,7 @@ func New(configPath string, dryRun bool) *Daemon {
 		configPath:        configPath,
 		dryRun:            dryRun,
 		registeredUnits:   make(map[string]struct{}),
+		criticalUnits:     make(map[string]struct{}),
 		unitCancels:       make(map[string]context.CancelFunc),
 		discoveryReloadCh: make(chan struct{}, 1),
 		timerReloadCh:     make(chan struct{}, 1),
@@ -116,6 +120,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return fmt.Errorf("starting socket listener: %w", err)
 	}
 
+	if d.cfg.HTTP.Enabled() {
+		d.httpServer = httphealth.New(d.cfg.HTTP, d.sm, d)
+		if err := d.httpServer.Start(ctx); err != nil {
+			return fmt.Errorf("starting http health server: %w", err)
+		}
+	}
+
 	d.sdNotifier = systemd.NewNotifier(func() string {
 		total, healthy, unhealthy := d.sm.Summary()
 
@@ -126,9 +137,25 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.sdNotifier.StartWatchdog()
 	defer d.sdNotifier.StopWatchdog()
 
+	if d.httpServer != nil {
+		d.httpServer.MarkReady()
+	}
+
 	slog.Info("daemon started", "registered_units", len(d.registeredUnits))
 
 	return d.eventLoop(ctx)
+}
+
+func (d *Daemon) CriticalUnits() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	names := make([]string, 0, len(d.criticalUnits))
+	for name := range d.criticalUnits {
+		names = append(names, name)
+	}
+
+	return names
 }
 
 func (d *Daemon) registerUnit(ctx context.Context, unitName string, unit *config.UnitConfig) {
@@ -142,6 +169,10 @@ func (d *Daemon) registerUnit(ctx context.Context, unitName string, unit *config
 	unitCtx, unitCancel := context.WithCancel(ctx)
 	d.registeredUnits[unitName] = struct{}{}
 	d.unitCancels[unitName] = unitCancel
+
+	if unit.Critical {
+		d.criticalUnits[unitName] = struct{}{}
+	}
 	d.mu.Unlock()
 
 	d.sm.Register(unitName)
@@ -202,6 +233,7 @@ func (d *Daemon) unregisterUnit(unitName string) {
 
 	delete(d.registeredUnits, unitName)
 	delete(d.unitCancels, unitName)
+	delete(d.criticalUnits, unitName)
 	d.mu.Unlock()
 
 	cancel()

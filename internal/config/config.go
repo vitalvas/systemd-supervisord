@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"reflect"
 	"regexp"
@@ -19,13 +20,22 @@ type Config struct {
 	Notify            NotifyConfig  `yaml:"notify"`
 	Socket            string        `yaml:"socket" validate:"omitempty"`
 	DiscoveryInterval time.Duration `yaml:"discovery_interval" validate:"omitempty,min=5s"`
+	HTTP              HTTPConfig    `yaml:"http"`
+}
+
+type HTTPConfig struct {
+	Listen          string        `yaml:"listen" validate:"omitempty,hostname_port"`
+	ReadTimeout     time.Duration `yaml:"read_timeout" validate:"omitempty,min=1s"`
+	WriteTimeout    time.Duration `yaml:"write_timeout" validate:"omitempty,min=1s"`
+	ShutdownTimeout time.Duration `yaml:"shutdown_timeout" validate:"omitempty,min=1s"`
 }
 
 type UnitConfig struct {
 	Name         string         `yaml:"-" validate:"required"`
 	Type         string         `yaml:"-" validate:"required,oneof=service timer"`
 	Enabled      *bool          `yaml:"enabled"`
-	Priority     *int           `yaml:"priority" validate:"omitempty,min=0"`
+	Critical     bool           `yaml:"critical"`
+	Priority     int            `yaml:"priority" validate:"omitempty,min=1"`
 	DependsOn    []string       `yaml:"depends_on"`
 	GracePeriod  time.Duration  `yaml:"grace_period" validate:"omitempty,min=0s"`
 	MaxDelay     time.Duration  `yaml:"max_delay" validate:"omitempty,min=1s"`
@@ -152,14 +162,6 @@ func (c *Config) Dependents(unitName string) []string {
 
 const DefaultPriority = 999
 
-func (u *UnitConfig) GetPriority() int {
-	if u.Priority == nil {
-		return DefaultPriority
-	}
-
-	return *u.Priority
-}
-
 func (u *UnitConfig) IsEnabled() bool {
 	if u.Enabled == nil {
 		return true
@@ -255,6 +257,7 @@ type rawConfig struct {
 	Notify            NotifyConfig  `yaml:"notify"`
 	Socket            string        `yaml:"socket"`
 	DiscoveryInterval time.Duration `yaml:"discovery_interval"`
+	HTTP              HTTPConfig    `yaml:"http"`
 }
 
 func Load(path string) (*Config, error) {
@@ -279,6 +282,7 @@ func Load(path string) (*Config, error) {
 		Notify:            raw.Notify,
 		Socket:            raw.Socket,
 		DiscoveryInterval: raw.DiscoveryInterval,
+		HTTP:              raw.HTTP,
 	}
 
 	if cfg.LogLevel == "" {
@@ -292,6 +296,8 @@ func Load(path string) (*Config, error) {
 	if cfg.DiscoveryInterval == 0 {
 		cfg.DiscoveryInterval = 30 * time.Second
 	}
+
+	applyHTTPDefaults(&cfg.HTTP)
 
 	for i := range cfg.Units {
 		applyDefaults(&cfg.Units[i])
@@ -326,7 +332,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	sort.SliceStable(cfg.Units, func(i, j int) bool {
-		return cfg.Units[i].GetPriority() < cfg.Units[j].GetPriority()
+		return cfg.Units[i].Priority < cfg.Units[j].Priority
 	})
 
 	return cfg, nil
@@ -570,7 +576,52 @@ func formatFirstValidationError(unit string, err error) error {
 	return fmt.Errorf("%s", msg)
 }
 
+const DefaultHTTPPort = "9999"
+
+func applyHTTPDefaults(h *HTTPConfig) {
+	if h.Listen == "" {
+		return
+	}
+
+	h.Listen = ensureHTTPPort(h.Listen)
+
+	if h.ReadTimeout == 0 {
+		h.ReadTimeout = 5 * time.Second
+	}
+
+	if h.WriteTimeout == 0 {
+		h.WriteTimeout = 5 * time.Second
+	}
+
+	if h.ShutdownTimeout == 0 {
+		h.ShutdownTimeout = 5 * time.Second
+	}
+}
+
+func ensureHTTPPort(listen string) string {
+	_, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return net.JoinHostPort(listen, DefaultHTTPPort)
+	}
+
+	if port == "" {
+		host, _, _ := net.SplitHostPort(listen)
+
+		return net.JoinHostPort(host, DefaultHTTPPort)
+	}
+
+	return listen
+}
+
+func (h *HTTPConfig) Enabled() bool {
+	return h.Listen != ""
+}
+
 func applyDefaults(u *UnitConfig) {
+	if u.Priority == 0 {
+		u.Priority = DefaultPriority
+	}
+
 	for i := range u.HealthChecks {
 		if u.HealthChecks[i].Interval == 0 {
 			u.HealthChecks[i].Interval = 10 * time.Second

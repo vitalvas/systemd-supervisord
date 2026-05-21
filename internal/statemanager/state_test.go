@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/vitalvas/systemd-supervisord/internal/systemd"
 )
 
 func TestStateManager(t *testing.T) {
@@ -40,19 +41,19 @@ func TestStateManager(t *testing.T) {
 			mu.Unlock()
 		})
 
-		sm.UpdateState("nginx.service", "active", "running")
+		sm.UpdateState("nginx.service", systemd.ActiveStateActive, systemd.SubStateRunning)
 
 		mu.Lock()
 		require.Len(t, received, 1)
 		assert.Equal(t, EventStateChanged, received[0].Type)
 		assert.Equal(t, "nginx.service", received[0].UnitName)
-		assert.Equal(t, "active", received[0].ActiveState)
-		assert.Equal(t, "running", received[0].SubState)
+		assert.Equal(t, systemd.ActiveStateActive, received[0].ActiveState)
+		assert.Equal(t, systemd.SubStateRunning, received[0].SubState)
 		mu.Unlock()
 
 		status := sm.GetStatus("nginx.service")
-		assert.Equal(t, "active", status.ActiveState)
-		assert.Equal(t, "running", status.SubState)
+		assert.Equal(t, systemd.ActiveStateActive, status.ActiveState)
+		assert.Equal(t, systemd.SubStateRunning, status.SubState)
 	})
 
 	t.Run("duplicate state does not emit", func(t *testing.T) {
@@ -65,8 +66,8 @@ func TestStateManager(t *testing.T) {
 			count++
 		})
 
-		sm.UpdateState("nginx.service", "active", "running")
-		sm.UpdateState("nginx.service", "active", "running")
+		sm.UpdateState("nginx.service", systemd.ActiveStateActive, systemd.SubStateRunning)
+		sm.UpdateState("nginx.service", systemd.ActiveStateActive, systemd.SubStateRunning)
 
 		assert.Equal(t, 1, count)
 	})
@@ -130,7 +131,7 @@ func TestStateManager(t *testing.T) {
 		sm.Register("a.service")
 		sm.Register("b.timer")
 
-		statuses := sm.GetAllStatuses()
+		statuses := sm.AllStatuses()
 		assert.Len(t, statuses, 2)
 	})
 
@@ -156,13 +157,13 @@ func TestStateManager(t *testing.T) {
 		done := make(chan struct{})
 
 		sm.OnEvent(func(ev Event) {
-			if ev.ActiveState == "active" {
+			if ev.ActiveState == systemd.ActiveStateActive {
 				sm.ResetRestartCount(ev.UnitName)
 			}
 		})
 
 		go func() {
-			sm.UpdateState("nginx.service", "active", "running")
+			sm.UpdateState("nginx.service", systemd.ActiveStateActive, systemd.SubStateRunning)
 			close(done)
 		}()
 

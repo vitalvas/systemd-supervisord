@@ -5,6 +5,33 @@ import (
 	"time"
 )
 
+const (
+	ActiveStateActive       = "active"
+	ActiveStateReloading    = "reloading"
+	ActiveStateInactive     = "inactive"
+	ActiveStateFailed       = "failed"
+	ActiveStateActivating   = "activating"
+	ActiveStateDeactivating = "deactivating"
+	ActiveStateMaintenance  = "maintenance"
+)
+
+const (
+	SubStateRunning     = "running"
+	SubStateDead        = "dead"
+	SubStateExited      = "exited"
+	SubStateFailed      = "failed"
+	SubStateWaiting     = "waiting"
+	SubStateListening   = "listening"
+	SubStateStartPre    = "start-pre"
+	SubStateStart       = "start"
+	SubStateStartPost   = "start-post"
+	SubStateStopPre     = "stop-pre"
+	SubStateStop        = "stop"
+	SubStateStopPost    = "stop-post"
+	SubStateAutoRestart = "auto-restart"
+	SubStateReload      = "reload"
+)
+
 type UnitState struct {
 	Name        string
 	ActiveState string

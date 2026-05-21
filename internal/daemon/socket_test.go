@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/vitalvas/systemd-supervisord/internal/config"
+	"github.com/vitalvas/systemd-supervisord/internal/systemd"
 )
 
 func TestRemoveStaleSocket(t *testing.T) {
@@ -107,7 +108,7 @@ func TestProcessRequest(t *testing.T) {
 		d := newTestDaemon(mgr, cfg)
 
 		d.sm.Register("app.service")
-		d.sm.UpdateState("app.service", "active", "running")
+		d.sm.UpdateState("app.service", systemd.ActiveStateActive, systemd.SubStateRunning)
 
 		resp := d.processRequest(context.Background(), Request{Command: "status"})
 
@@ -122,7 +123,7 @@ func TestProcessRequest(t *testing.T) {
 		d := newTestDaemon(mgr, cfg)
 
 		d.sm.Register("app.service")
-		d.sm.UpdateState("app.service", "active", "running")
+		d.sm.UpdateState("app.service", systemd.ActiveStateActive, systemd.SubStateRunning)
 
 		resp := d.processRequest(context.Background(), Request{
 			Command:  "status",
@@ -365,7 +366,7 @@ func TestListenSocket(t *testing.T) {
 		d := newTestDaemon(mgr, cfg)
 
 		d.sm.Register("app.service")
-		d.sm.UpdateState("app.service", "active", "running")
+		d.sm.UpdateState("app.service", systemd.ActiveStateActive, systemd.SubStateRunning)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()

@@ -80,7 +80,7 @@ func TestRestarter(t *testing.T) {
 		r.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "failed",
+			ActiveState: systemd.ActiveStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -109,7 +109,7 @@ func TestRestarter(t *testing.T) {
 			r.HandleEvent(statemanager.Event{
 				Type:        statemanager.EventStateChanged,
 				UnitName:    "app.service",
-				ActiveState: "failed",
+				ActiveState: systemd.ActiveStateFailed,
 				Timestamp:   time.Now(),
 			})
 
@@ -136,7 +136,7 @@ func TestRestarter(t *testing.T) {
 		r.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "failed",
+			ActiveState: systemd.ActiveStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -160,8 +160,8 @@ func TestRestarter(t *testing.T) {
 		r.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "active",
-			SubState:    "running",
+			ActiveState: systemd.ActiveStateActive,
+			SubState:    systemd.SubStateRunning,
 			Timestamp:   time.Now(),
 		})
 
@@ -185,7 +185,7 @@ func TestRestarter(t *testing.T) {
 		r.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "failed",
+			ActiveState: systemd.ActiveStateFailed,
 			Timestamp:   time.Now(),
 		})
 		<-mock.restartCh
@@ -193,8 +193,8 @@ func TestRestarter(t *testing.T) {
 		r.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "active",
-			SubState:    "running",
+			ActiveState: systemd.ActiveStateActive,
+			SubState:    systemd.SubStateRunning,
 			Timestamp:   time.Now(),
 		})
 
@@ -242,7 +242,7 @@ func TestRestarter(t *testing.T) {
 		r.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "unknown.service",
-			ActiveState: "failed",
+			ActiveState: systemd.ActiveStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -270,7 +270,7 @@ func TestRestarter(t *testing.T) {
 		r.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "failed",
+			ActiveState: systemd.ActiveStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -297,7 +297,7 @@ func TestRestarter(t *testing.T) {
 		r.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "failed",
+			ActiveState: systemd.ActiveStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -334,7 +334,7 @@ func TestRestarter(t *testing.T) {
 		r.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "failed",
+			ActiveState: systemd.ActiveStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -364,7 +364,7 @@ func TestRestarter(t *testing.T) {
 		r.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "failed",
+			ActiveState: systemd.ActiveStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -379,7 +379,7 @@ func TestRestarter(t *testing.T) {
 		r.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "app.service",
-			ActiveState: "failed",
+			ActiveState: systemd.ActiveStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -474,7 +474,7 @@ func TestRestarter(t *testing.T) {
 		r.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "db.service",
-			ActiveState: "failed",
+			ActiveState: systemd.ActiveStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -515,7 +515,7 @@ func TestRestarter(t *testing.T) {
 		r.HandleEvent(statemanager.Event{
 			Type:        statemanager.EventStateChanged,
 			UnitName:    "db.service",
-			ActiveState: "failed",
+			ActiveState: systemd.ActiveStateFailed,
 			Timestamp:   time.Now(),
 		})
 
@@ -590,7 +590,7 @@ func TestRestarter(t *testing.T) {
 
 		r.Unregister("app.service")
 
-		sm.UpdateState("app.service", "failed", "failed")
+		sm.UpdateState("app.service", systemd.ActiveStateFailed, systemd.SubStateFailed)
 
 		time.Sleep(200 * time.Millisecond)
 		assert.Empty(t, mock.restartCh)

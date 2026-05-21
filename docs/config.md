@@ -42,7 +42,7 @@ Each entry in the `units` map defines a systemd unit to supervise. The map key i
 | Option          | Type     | Required | Default | Description                                                |
 |-----------------|----------|----------|---------|------------------------------------------------------------|
 | `enabled`       | bool     | No       | `true`  | Whether this unit is actively supervised.                  |
-| `priority`      | int      | No       | `999`   | Startup ordering priority. Lower values start first. Minimum: `0`. |
+| `priority`      | int      | No       | `999`   | Startup ordering priority. Lower values start first. Minimum: `1`. |
 | `depends_on`    | list     | No       | --      | Unit names that must start before this unit.               |
 | `grace_period`  | duration | No       | `0s`    | Delay before health checks begin. Useful for slow-starting services. |
 | `max_delay`     | duration | No       | --      | Maximum allowed time since last timer trigger. Timer-only. If exceeded, the timer is restarted. Minimum: `1s`. |
@@ -129,7 +129,7 @@ Controls the order in which units are registered at startup. Lower values are re
 ```yaml
 units:
   database.service:
-    priority: 0
+    priority: 1
   cache.service:
     priority: 10
   webapp.service:
@@ -171,7 +171,7 @@ units:
 ```yaml
 units:
   mydb.service:
-    priority: 0
+    priority: 1
   cache.service:
     priority: 10
   webapp.service:
@@ -181,7 +181,7 @@ units:
       - cache
 ```
 
-In this example, `mydb` is registered first (priority 0), then `cache` (10), then `webapp` (100). If `mydb` is restarted, `webapp` is cascade-restarted because it depends on `mydb`.
+In this example, `mydb` is registered first (priority 1), then `cache` (10), then `webapp` (100). If `mydb` is restarted, `webapp` is cascade-restarted because it depends on `mydb`.
 
 ### Grace Period
 

@@ -15,6 +15,7 @@ A supervisor daemon for systemd services and timers. It monitors unit health, au
 - **Notifications** -- Webhooks, scripts, and exec actions triggered on state and health changes
 - **Systemd Integration** -- sd_notify protocol support with watchdog, D-Bus API with systemctl fallback
 - **CLI Control** -- List, status, start, stop, and restart units via Unix socket IPC
+- **HTTP Health Endpoint** -- Optional HTTP server exposing `/health`, `/ready`, `/live` for external probes (e.g. AWS ASG, Kubernetes)
 
 ## Configuration
 
@@ -27,6 +28,7 @@ Create the configuration file at `/etc/systemd-supervisord/config.yaml`.
 | `log_level`          | Log level (`debug`, `info`, `warn`, `error`)   | `info`                             |
 | `socket`             | Unix socket path for CLI communication         | `/var/run/systemd-supervisord.sock`|
 | `discovery_interval` | How often to discover new template instances    | `30s`                              |
+| `http`               | HTTP health endpoint configuration (see below) | disabled                           |
 
 ### Unit configuration
 
@@ -34,6 +36,7 @@ Create the configuration file at `/etc/systemd-supervisord/config.yaml`.
 units:
   nginx.service:
     enabled: true
+    critical: true         # include in HTTP /health aggregate
     grace_period: 30s      # delay before health checks start
     depends_on:            # units that must be started first
       - mydb
@@ -127,6 +130,30 @@ Scripts and exec actions receive the following environment variables:
 | `SUPERVISORD_HEALTHY`       | Health status: `true` or `false`. Not set if unit has no health checks. |
 | `SUPERVISORD_TIMESTAMP`     | Event timestamp in RFC 3339 format.                          |
 | `SUPERVISORD_VAR_<KEY>`     | Custom variables from `notify.variables`. Keys are uppercased. |
+
+### HTTP health endpoint
+
+Expose health information over HTTP for external probes such as AWS ASG, ELB, or Kubernetes. Disabled by default; enable by setting `listen`.
+
+```yaml
+http:
+  listen: 0.0.0.0          # host[:port] to bind; empty disables the server. Port defaults to 9999 if omitted.
+  read_timeout: 5s         # HTTP read timeout (default 5s)
+  write_timeout: 5s        # HTTP write timeout (default 5s)
+  shutdown_timeout: 5s     # graceful shutdown timeout (default 5s)
+```
+
+Endpoints:
+
+| Path     | Status   | Description                                                            |
+|----------|----------|------------------------------------------------------------------------|
+| `/health` | 200/503 | Aggregate of all units marked `critical: true`. Returns 503 if any critical unit is not `active` or has a failing health check. Returns 200 if no critical units are configured. |
+| `/ready`  | 200/503 | Returns 200 once the daemon has finished initial unit registration. 503 during startup. |
+| `/live`   | 200     | Always returns 200 while the server is serving. Use for liveness probes. |
+
+All endpoints accept `GET` and `HEAD` and return a JSON body with `status`, `ready`, `timestamp`, and (for `/health`) a `units` list with current state.
+
+Mark services you want included in the aggregate with `critical: true` in the unit config. When set on a template, all discovered instances inherit the flag.
 
 ## CLI Usage
 

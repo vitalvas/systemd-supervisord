@@ -33,8 +33,8 @@ func (s *stubManager) Restart(_ context.Context, _ string) error {
 func (s *stubManager) GetUnitState(_ context.Context, _ string) (*UnitState, error) {
 	return &UnitState{
 		Name:        "test.service",
-		ActiveState: "active",
-		SubState:    "running",
+		ActiveState: ActiveStateActive,
+		SubState:    SubStateRunning,
 	}, nil
 }
 
@@ -88,7 +88,7 @@ func TestDryRunManager(t *testing.T) {
 
 		state, err := drm.GetUnitState(context.Background(), "test.service")
 		require.NoError(t, err)
-		assert.Equal(t, "active", state.ActiveState)
+		assert.Equal(t, ActiveStateActive, state.ActiveState)
 	})
 
 	t.Run("get timer last trigger delegates to real manager", func(t *testing.T) {

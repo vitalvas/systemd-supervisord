@@ -132,7 +132,7 @@ func (d *Daemon) processRequest(ctx context.Context, req Request) Response {
 			return Response{Success: true, Data: status}
 		}
 
-		return Response{Success: true, Data: d.sm.GetAllStatuses()}
+		return Response{Success: true, Data: d.sm.AllStatuses()}
 
 	case "start":
 		if req.UnitName == "" {
