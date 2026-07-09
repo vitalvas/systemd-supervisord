@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1030,6 +1031,234 @@ units:
 `
 		cfg := loadFromString(t, content)
 		assert.True(t, cfg.Units[0].Critical)
+	})
+}
+
+func TestSocketActivation(t *testing.T) {
+	sa := func(entries string) string {
+		return fmt.Sprintf(`
+units:
+  nginx.service:
+    enabled: true
+socket_activation:
+%s`, entries)
+	}
+
+	t.Run("valid with defaults", func(t *testing.T) {
+		content := sa(`  llama@gemma.service:
+    listen: "127.0.0.1:4101"
+    backend: "127.0.0.1:5101"
+    health_url: "http://127.0.0.1:5101/health"
+`)
+		cfg := loadFromString(t, content)
+		require.Len(t, cfg.SocketActivation, 1)
+
+		sa := cfg.SocketActivation[0]
+		assert.Equal(t, "llama@gemma.service", sa.Unit)
+		assert.Equal(t, "gemma", sa.Name)
+		assert.Equal(t, "127.0.0.1:4101", sa.Listen)
+		assert.Equal(t, "127.0.0.1:5101", sa.Backend)
+		assert.Equal(t, "http://127.0.0.1:5101/health", sa.HealthURL)
+		assert.Equal(t, DefaultStartupTimeout, sa.StartupTimeout)
+		assert.Equal(t, DefaultIdleTimeout, sa.IdleTimeout)
+		assert.Equal(t, DefaultHealthInterval, sa.HealthInterval)
+		assert.Equal(t, DefaultHealthTimeout, sa.HealthTimeout)
+	})
+
+	t.Run("name derived from key", func(t *testing.T) {
+		content := sa(`  coredns.service:
+    listen: "127.0.0.1:53"
+    backend: "127.0.0.1:5353"
+  worker@shard0.service:
+    listen: "127.0.0.1:6000"
+    backend: "127.0.0.1:7000"
+`)
+		cfg := loadFromString(t, content)
+		byUnit := map[string]string{}
+		for _, sa := range cfg.SocketActivation {
+			byUnit[sa.Unit] = sa.Name
+		}
+		assert.Equal(t, "coredns", byUnit["coredns.service"])
+		assert.Equal(t, "shard0", byUnit["worker@shard0.service"])
+	})
+
+	t.Run("explicit timeouts preserved", func(t *testing.T) {
+		content := sa(`  llama@gemma.service:
+    listen: "127.0.0.1:4101"
+    backend: "127.0.0.1:5101"
+    startup_timeout: 10m
+    idle_timeout: 15m
+    health_interval: 1s
+    health_timeout: 3s
+`)
+		cfg := loadFromString(t, content)
+		sa := cfg.SocketActivation[0]
+		assert.Equal(t, 10*time.Minute, sa.StartupTimeout)
+		assert.Equal(t, 15*time.Minute, sa.IdleTimeout)
+		assert.Equal(t, time.Second, sa.HealthInterval)
+		assert.Equal(t, 3*time.Second, sa.HealthTimeout)
+	})
+
+	t.Run("no health_url allowed", func(t *testing.T) {
+		content := sa(`  llama@gemma.service:
+    listen: "127.0.0.1:4101"
+    backend: "127.0.0.1:5101"
+`)
+		cfg := loadFromString(t, content)
+		assert.Empty(t, cfg.SocketActivation[0].HealthURL)
+	})
+
+	t.Run("empty unit key rejected", func(t *testing.T) {
+		content := sa(`  "":
+    listen: "127.0.0.1:4101"
+    backend: "127.0.0.1:5101"
+`)
+		_, err := loadStringConfig(content)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "empty socket_activation unit name")
+	})
+
+	t.Run("not a map rejected", func(t *testing.T) {
+		content := sa(`  - llama@gemma.service
+`)
+		_, err := loadStringConfig(content)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must be a map keyed by unit name")
+	})
+
+	t.Run("invalid listen rejected", func(t *testing.T) {
+		content := sa(`  llama@gemma.service:
+    listen: "not-a-host-port"
+    backend: "127.0.0.1:5101"
+`)
+		_, err := loadStringConfig(content)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "listen")
+	})
+
+	t.Run("invalid backend rejected", func(t *testing.T) {
+		content := sa(`  llama@gemma.service:
+    listen: "127.0.0.1:4101"
+    backend: "nohostport"
+`)
+		_, err := loadStringConfig(content)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "backend")
+	})
+
+	t.Run("invalid health_url rejected", func(t *testing.T) {
+		content := sa(`  llama@gemma.service:
+    listen: "127.0.0.1:4101"
+    backend: "127.0.0.1:5101"
+    health_url: "://bad"
+`)
+		_, err := loadStringConfig(content)
+		require.Error(t, err)
+	})
+
+	t.Run("duplicate unit key rejected", func(t *testing.T) {
+		content := sa(`  llama@gemma.service:
+    listen: "127.0.0.1:4101"
+    backend: "127.0.0.1:5101"
+  llama@gemma.service:
+    listen: "127.0.0.1:4102"
+    backend: "127.0.0.1:5102"
+`)
+		_, err := loadStringConfig(content)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicate socket_activation unit")
+	})
+
+	t.Run("duplicate listen rejected", func(t *testing.T) {
+		content := sa(`  llama@gemma.service:
+    listen: "127.0.0.1:4101"
+    backend: "127.0.0.1:5101"
+  llama@other.service:
+    listen: "127.0.0.1:4101"
+    backend: "127.0.0.1:5102"
+`)
+		_, err := loadStringConfig(content)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicate socket_activation listener tcp")
+	})
+
+	t.Run("default protocol is tcp", func(t *testing.T) {
+		content := sa(`  llama@gemma.service:
+    listen: "127.0.0.1:4101"
+    backend: "127.0.0.1:5101"
+`)
+		cfg := loadFromString(t, content)
+		assert.Equal(t, []string{"tcp"}, cfg.SocketActivation[0].Protocol)
+	})
+
+	t.Run("explicit protocol list preserved", func(t *testing.T) {
+		content := sa(`  coredns.service:
+    listen: "127.0.0.1:53"
+    backend: "127.0.0.1:5353"
+    protocol: [udp, tcp]
+`)
+		cfg := loadFromString(t, content)
+		assert.Equal(t, []string{"udp", "tcp"}, cfg.SocketActivation[0].Protocol)
+	})
+
+	t.Run("duplicate protocol deduped", func(t *testing.T) {
+		content := sa(`  coredns.service:
+    listen: "127.0.0.1:53"
+    backend: "127.0.0.1:5353"
+    protocol: [udp, udp, tcp]
+`)
+		cfg := loadFromString(t, content)
+		assert.Equal(t, []string{"udp", "tcp"}, cfg.SocketActivation[0].Protocol)
+	})
+
+	t.Run("invalid protocol rejected", func(t *testing.T) {
+		content := sa(`  coredns.service:
+    listen: "127.0.0.1:53"
+    backend: "127.0.0.1:5353"
+    protocol: [sctp]
+`)
+		_, err := loadStringConfig(content)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "protocol")
+	})
+
+	t.Run("same listen different protocol allowed across entries", func(t *testing.T) {
+		content := sa(`  dns-udp.service:
+    listen: "127.0.0.1:53"
+    backend: "127.0.0.1:5353"
+    protocol: [udp]
+  dns-tcp.service:
+    listen: "127.0.0.1:53"
+    backend: "127.0.0.1:5353"
+    protocol: [tcp]
+`)
+		cfg := loadFromString(t, content)
+		assert.Len(t, cfg.SocketActivation, 2)
+	})
+
+	t.Run("duplicate protocol listener across entries rejected", func(t *testing.T) {
+		content := sa(`  dns-a.service:
+    listen: "127.0.0.1:53"
+    backend: "127.0.0.1:5353"
+    protocol: [udp, tcp]
+  dns-b.service:
+    listen: "127.0.0.1:53"
+    backend: "127.0.0.1:5354"
+    protocol: [udp]
+`)
+		_, err := loadStringConfig(content)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicate socket_activation listener udp")
+	})
+
+	t.Run("empty map valid", func(t *testing.T) {
+		content := `
+units:
+  nginx.service:
+    enabled: true
+`
+		cfg := loadFromString(t, content)
+		assert.Empty(t, cfg.SocketActivation)
 	})
 }
 

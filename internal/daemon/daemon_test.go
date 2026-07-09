@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"sync"
 	"syscall"
@@ -15,6 +16,7 @@ import (
 	"github.com/vitalvas/systemd-supervisord/internal/healthcheck"
 	"github.com/vitalvas/systemd-supervisord/internal/notify"
 	"github.com/vitalvas/systemd-supervisord/internal/restarter"
+	"github.com/vitalvas/systemd-supervisord/internal/socketactivation"
 	"github.com/vitalvas/systemd-supervisord/internal/statemanager"
 	"github.com/vitalvas/systemd-supervisord/internal/systemd"
 )
@@ -1012,6 +1014,78 @@ units:
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "loading config")
 	})
+}
+
+func TestSocketActivationWiring(t *testing.T) {
+	// Backend echo server the activator proxies to.
+	backend, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer backend.Close()
+
+	go func() {
+		for {
+			conn, err := backend.Accept()
+			if err != nil {
+				return
+			}
+
+			go func(c net.Conn) {
+				defer c.Close()
+
+				buf := make([]byte, 64)
+				n, rerr := c.Read(buf)
+				if rerr == nil {
+					c.Write(buf[:n])
+				}
+			}(conn)
+		}
+	}()
+
+	listenLn, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	listenAddr := listenLn.Addr().String()
+	listenLn.Close()
+
+	mgr := newMockManager()
+	cfg := &config.Config{
+		Units: []config.UnitConfig{{Name: "placeholder", Type: "service", Enabled: boolPtr(false)}},
+		SocketActivation: []config.SocketActivationConfig{{
+			Name:           "test",
+			Listen:         listenAddr,
+			Unit:           "backend.service",
+			Backend:        backend.Addr().String(),
+			StartupTimeout: 2 * time.Second,
+			IdleTimeout:    10 * time.Second,
+			HealthInterval: 10 * time.Millisecond,
+			HealthTimeout:  time.Second,
+		}},
+	}
+
+	d := newTestDaemon(mgr, cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	d.socketMgr = socketactivation.NewManager(cfg.SocketActivation, d.mgr)
+	require.NoError(t, d.socketMgr.Start(ctx))
+
+	conn, err := net.Dial("tcp", listenAddr)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	_, err = conn.Write([]byte("ping"))
+	require.NoError(t, err)
+
+	buf := make([]byte, 4)
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(2*time.Second)))
+	n, err := conn.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, "ping", string(buf[:n]))
+
+	mgr.mu.Lock()
+	starts := append([]string(nil), mgr.startCalls...)
+	mgr.mu.Unlock()
+	assert.Contains(t, starts, "backend.service")
 }
 
 func TestReload(t *testing.T) {

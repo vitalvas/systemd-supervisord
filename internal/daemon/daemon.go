@@ -16,6 +16,7 @@ import (
 	"github.com/vitalvas/systemd-supervisord/internal/httphealth"
 	"github.com/vitalvas/systemd-supervisord/internal/notify"
 	"github.com/vitalvas/systemd-supervisord/internal/restarter"
+	"github.com/vitalvas/systemd-supervisord/internal/socketactivation"
 	"github.com/vitalvas/systemd-supervisord/internal/statemanager"
 	"github.com/vitalvas/systemd-supervisord/internal/systemd"
 )
@@ -31,6 +32,7 @@ type Daemon struct {
 	restarter  *restarter.Restarter
 	sdNotifier *systemd.Notifier
 	httpServer *httphealth.Server
+	socketMgr  *socketactivation.Manager
 	cancel     context.CancelFunc
 
 	changeCh chan systemd.StateChange
@@ -124,6 +126,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.httpServer = httphealth.New(d.cfg.HTTP, d.sm, d)
 		if err := d.httpServer.Start(ctx); err != nil {
 			return fmt.Errorf("starting http health server: %w", err)
+		}
+	}
+
+	if len(d.cfg.SocketActivation) > 0 {
+		d.socketMgr = socketactivation.NewManager(d.cfg.SocketActivation, d.mgr)
+		if err := d.socketMgr.Start(ctx); err != nil {
+			return fmt.Errorf("starting socket activation: %w", err)
 		}
 	}
 

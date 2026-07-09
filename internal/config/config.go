@@ -15,12 +15,26 @@ import (
 )
 
 type Config struct {
-	LogLevel          string        `yaml:"log_level" validate:"omitempty,oneof=debug info warn error"`
-	Units             []UnitConfig  `yaml:"-" validate:"required,min=1"`
-	Notify            NotifyConfig  `yaml:"notify"`
-	Socket            string        `yaml:"socket" validate:"omitempty"`
-	DiscoveryInterval time.Duration `yaml:"discovery_interval" validate:"omitempty,min=5s"`
-	HTTP              HTTPConfig    `yaml:"http"`
+	LogLevel          string                   `yaml:"log_level" validate:"omitempty,oneof=debug info warn error"`
+	Units             []UnitConfig             `yaml:"-" validate:"required,min=1"`
+	Notify            NotifyConfig             `yaml:"notify"`
+	Socket            string                   `yaml:"socket" validate:"omitempty"`
+	DiscoveryInterval time.Duration            `yaml:"discovery_interval" validate:"omitempty,min=5s"`
+	HTTP              HTTPConfig               `yaml:"http"`
+	SocketActivation  []SocketActivationConfig `yaml:"socket_activation" validate:"dive"`
+}
+
+type SocketActivationConfig struct {
+	Unit           string        `yaml:"-" validate:"required"`
+	Name           string        `yaml:"-"`
+	Listen         string        `yaml:"listen" validate:"required,hostname_port"`
+	Protocol       []string      `yaml:"protocol" validate:"dive,oneof=tcp udp"`
+	Backend        string        `yaml:"backend" validate:"required,hostname_port"`
+	HealthURL      string        `yaml:"health_url" validate:"omitempty,url"`
+	StartupTimeout time.Duration `yaml:"startup_timeout" validate:"omitempty,min=1s"`
+	IdleTimeout    time.Duration `yaml:"idle_timeout" validate:"omitempty,min=1s"`
+	HealthInterval time.Duration `yaml:"health_interval" validate:"omitempty,min=100ms"`
+	HealthTimeout  time.Duration `yaml:"health_timeout" validate:"omitempty,min=100ms"`
 }
 
 type HTTPConfig struct {
@@ -258,6 +272,7 @@ type rawConfig struct {
 	Socket            string        `yaml:"socket"`
 	DiscoveryInterval time.Duration `yaml:"discovery_interval"`
 	HTTP              HTTPConfig    `yaml:"http"`
+	SocketActivation  yaml.Node     `yaml:"socket_activation"`
 }
 
 func Load(path string) (*Config, error) {
@@ -276,6 +291,11 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
+	socketActivation, err := parseSocketActivation(&raw.SocketActivation)
+	if err != nil {
+		return nil, fmt.Errorf("parsing config: %w", err)
+	}
+
 	cfg := &Config{
 		LogLevel:          raw.LogLevel,
 		Units:             units,
@@ -283,6 +303,7 @@ func Load(path string) (*Config, error) {
 		Socket:            raw.Socket,
 		DiscoveryInterval: raw.DiscoveryInterval,
 		HTTP:              raw.HTTP,
+		SocketActivation:  socketActivation,
 	}
 
 	if cfg.LogLevel == "" {
@@ -298,6 +319,10 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyHTTPDefaults(&cfg.HTTP)
+
+	for i := range cfg.SocketActivation {
+		applySocketActivationDefaults(&cfg.SocketActivation[i])
+	}
 
 	for i := range cfg.Units {
 		applyDefaults(&cfg.Units[i])
@@ -328,6 +353,10 @@ func Load(path string) (*Config, error) {
 	}
 
 	if err := validateDependencies(cfg.Units); err != nil {
+		return nil, fmt.Errorf("validating config: %w", err)
+	}
+
+	if err := validateSocketActivation(cfg.SocketActivation); err != nil {
 		return nil, fmt.Errorf("validating config: %w", err)
 	}
 
@@ -405,6 +434,69 @@ func parseUnits(node *yaml.Node) ([]UnitConfig, error) {
 	}
 
 	return units, nil
+}
+
+func parseSocketActivation(node *yaml.Node) ([]SocketActivationConfig, error) {
+	if node.Kind == 0 {
+		return nil, nil
+	}
+
+	if node.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("socket_activation must be a map keyed by unit name, got %v", node.Kind)
+	}
+
+	if len(node.Content)%2 != 0 {
+		return nil, fmt.Errorf("invalid socket_activation map structure")
+	}
+
+	seen := make(map[string]struct{})
+	entries := make([]SocketActivationConfig, 0, len(node.Content)/2)
+
+	for i := 0; i < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valNode := node.Content[i+1]
+
+		unit := keyNode.Value
+
+		if unit == "" {
+			return nil, fmt.Errorf("empty socket_activation unit name")
+		}
+
+		if _, exists := seen[unit]; exists {
+			return nil, fmt.Errorf("duplicate socket_activation unit %q", unit)
+		}
+
+		seen[unit] = struct{}{}
+
+		var e SocketActivationConfig
+		if err := valNode.Decode(&e); err != nil {
+			return nil, fmt.Errorf("decoding socket_activation %q: %w", unit, err)
+		}
+
+		e.Unit = unit
+		e.Name = socketActivationName(unit)
+
+		entries = append(entries, e)
+	}
+
+	return entries, nil
+}
+
+// socketActivationName derives a friendly log identifier from a unit name by
+// stripping the type suffix and any template instance prefix.
+func socketActivationName(unit string) string {
+	name := strings.TrimSuffix(strings.TrimSuffix(unit, ".service"), ".timer")
+
+	if idx := strings.Index(name, "@"); idx >= 0 {
+		instance := name[idx+1:]
+		if instance != "" {
+			return instance
+		}
+
+		return name[:idx]
+	}
+
+	return name
 }
 
 func validateTemplates(units []UnitConfig) error {
@@ -615,6 +707,73 @@ func ensureHTTPPort(listen string) string {
 
 func (h *HTTPConfig) Enabled() bool {
 	return h.Listen != ""
+}
+
+const (
+	DefaultStartupTimeout = 30 * time.Second
+	DefaultIdleTimeout    = 5 * time.Minute
+	DefaultHealthInterval = 500 * time.Millisecond
+	DefaultHealthTimeout  = 2 * time.Second
+)
+
+func applySocketActivationDefaults(s *SocketActivationConfig) {
+	if len(s.Protocol) == 0 {
+		s.Protocol = []string{"tcp"}
+	} else {
+		s.Protocol = dedupeProtocols(s.Protocol)
+	}
+
+	if s.StartupTimeout == 0 {
+		s.StartupTimeout = DefaultStartupTimeout
+	}
+
+	if s.IdleTimeout == 0 {
+		s.IdleTimeout = DefaultIdleTimeout
+	}
+
+	if s.HealthInterval == 0 {
+		s.HealthInterval = DefaultHealthInterval
+	}
+
+	if s.HealthTimeout == 0 {
+		s.HealthTimeout = DefaultHealthTimeout
+	}
+}
+
+func dedupeProtocols(protocols []string) []string {
+	seen := make(map[string]struct{}, len(protocols))
+	result := make([]string, 0, len(protocols))
+
+	for _, p := range protocols {
+		if _, ok := seen[p]; ok {
+			continue
+		}
+
+		seen[p] = struct{}{}
+		result = append(result, p)
+	}
+
+	return result
+}
+
+func validateSocketActivation(entries []SocketActivationConfig) error {
+	listens := make(map[string]struct{}, len(entries))
+
+	for i := range entries {
+		e := &entries[i]
+
+		for _, proto := range e.Protocol {
+			key := fmt.Sprintf("%s/%s", proto, e.Listen)
+
+			if _, exists := listens[key]; exists {
+				return fmt.Errorf("duplicate socket_activation listener %s %q", proto, e.Listen)
+			}
+
+			listens[key] = struct{}{}
+		}
+	}
+
+	return nil
 }
 
 func applyDefaults(u *UnitConfig) {

@@ -16,6 +16,7 @@ A supervisor daemon for systemd services and timers. It monitors unit health, au
 - **Systemd Integration** -- sd_notify protocol support with watchdog, D-Bus API with systemctl fallback
 - **CLI Control** -- List, status, start, stop, and restart units via Unix socket IPC
 - **HTTP Health Endpoint** -- Optional HTTP server exposing `/health`, `/ready`, `/live` for external probes (e.g. AWS ASG, Kubernetes)
+- **Socket Activation** -- Listen on a public/local port, start a systemd unit on the first connection, wait until the backend is healthy, proxy traffic, and stop the unit after an idle timeout
 
 ## Configuration
 
@@ -29,6 +30,7 @@ Create the configuration file at `/etc/systemd-supervisord/config.yaml`.
 | `socket`             | Unix socket path for CLI communication         | `/var/run/systemd-supervisord.sock`|
 | `discovery_interval` | How often to discover new template instances    | `30s`                              |
 | `http`               | HTTP health endpoint configuration (see below) | disabled                           |
+| `socket_activation`  | On-demand unit activation with a TCP/UDP proxy, keyed by unit name (see below) | disabled |
 
 ### Unit configuration
 
@@ -154,6 +156,52 @@ Endpoints:
 All endpoints accept `GET` and `HEAD` and return a JSON body with `status`, `ready`, `timestamp`, and (for `/health`) a `units` list with current state.
 
 Mark services you want included in the aggregate with `critical: true` in the unit config. When set on a template, all discovered instances inherit the flag.
+
+### Socket activation
+
+Lazily start a systemd unit on demand and proxy connections to it. Each entry is keyed by the systemd unit name. The supervisor listens on `listen`, and when the first client connects it starts the unit, waits until the backend is healthy, and relays traffic to `backend`. When there are no active connections and no traffic for `idle_timeout`, the unit is stopped again. This is useful for GPU-heavy or otherwise expensive backends (for example LLM runners) that should only run while in use.
+
+```yaml
+socket_activation:
+  llama@gemma-4-e4b.service:                   # map key: systemd unit started on demand
+    listen: "127.0.0.1:4101"                  # host:port the supervisor listens on
+    protocol: [tcp]                            # tcp, udp, or both; default [tcp]
+    backend: "127.0.0.1:5101"                 # host:port to proxy traffic to
+    health_url: "http://127.0.0.1:5101/health" # optional; HTTP probe used to detect readiness
+    startup_timeout: 10m                       # max time to wait for the backend to become healthy (default 30s)
+    idle_timeout: 15m                          # stop the unit after this much idle time (default 5m)
+    health_interval: 500ms                     # how often to probe during startup (default 500ms)
+    health_timeout: 2s                         # per-probe timeout (default 2s)
+```
+
+Behavior:
+
+- The map key is the systemd unit started on demand. A short log identifier is derived from it (the template instance for `name@instance.service`, otherwise the unit's base name).
+- The proxy operates at layer 4 and is protocol-agnostic, so any backend that speaks over TCP or UDP works (HTTP, gRPC, DNS, and others).
+- `protocol` selects which listeners to bind: `[tcp]` (default), `[udp]`, or `[tcp, udp]`. Each protocol binds its own listener on the same `listen` address, and all listeners share one on-demand unit start and one idle lifecycle.
+- When `health_url` is set, readiness is detected with an HTTP `GET` expecting a `2xx` response. When omitted, a plain TCP dial to `backend` is used instead.
+- Concurrent connections that arrive during startup share a single start attempt; the client connection blocks until the backend is healthy or `startup_timeout` elapses.
+- Idle is measured by both active connections and last byte transferred: the unit is stopped only when there are no active connections (or UDP sessions) and no traffic in either direction for `idle_timeout`.
+- If the backend does not become healthy within `startup_timeout`, the pending client connection is closed and the next connection retries.
+
+UDP notes:
+
+- UDP has no connection to close, so each client source address becomes a short-lived session with its own backend socket. Replies are routed back to the client while the session is live. Sessions expire after a period of inactivity and are re-established automatically on the next datagram.
+- The first datagram that wakes the unit is not answered if the backend is not yet healthy; the client's normal retry (as DNS resolvers do) lands on the now-ready backend.
+
+Each unit key must be unique, and each `protocol`/`listen` pair must be unique across entries (the same address may serve both `tcp` and `udp`).
+
+Example: on-demand DNS resolver serving UDP and TCP on port 53:
+
+```yaml
+socket_activation:
+  coredns.service:
+    listen: "127.0.0.1:53"
+    protocol: [udp, tcp]
+    backend: "127.0.0.1:5353"
+    startup_timeout: 30s
+    idle_timeout: 15m
+```
 
 ## CLI Usage
 
