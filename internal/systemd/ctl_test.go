@@ -6,12 +6,56 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// fakeSystemctlOnce builds a single wrapper executable named "systemctl" that
+// each test reuses. Writing a fresh executable per subtest is slow on some
+// platforms (for example macOS assesses every newly written binary on first
+// exec), so the wrapper is created once per package run and dispatches to a
+// per-test script data file named by the SYSTEMCTL_FAKE_SCRIPT env var.
+var (
+	fakeSystemctlOnce sync.Once
+	fakeSystemctlDir  string
+	fakeSystemctlErr  error
+)
+
+func fakeSystemctlWrapperDir() (string, error) {
+	fakeSystemctlOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "fake-systemctl")
+		if err != nil {
+			fakeSystemctlErr = err
+
+			return
+		}
+
+		wrapper := "#!/bin/sh\nexec /bin/sh \"$SYSTEMCTL_FAKE_SCRIPT\" \"$@\"\n"
+		if err := os.WriteFile(filepath.Join(dir, "systemctl"), []byte(wrapper), 0o755); err != nil {
+			fakeSystemctlErr = err
+
+			return
+		}
+
+		fakeSystemctlDir = dir
+	})
+
+	return fakeSystemctlDir, fakeSystemctlErr
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+
+	if fakeSystemctlDir != "" {
+		_ = os.RemoveAll(fakeSystemctlDir)
+	}
+
+	os.Exit(code)
+}
 
 func createFakeSystemctl(t *testing.T, script string) {
 	t.Helper()
@@ -20,13 +64,14 @@ func createFakeSystemctl(t *testing.T, script string) {
 		t.Skip("fake systemctl not supported on windows")
 	}
 
-	dir := t.TempDir()
-	scriptPath := filepath.Join(dir, "systemctl")
+	wrapperDir, err := fakeSystemctlWrapperDir()
+	require.NoError(t, err)
 
-	fullScript := fmt.Sprintf("#!/bin/sh\n%s", script)
-	require.NoError(t, os.WriteFile(scriptPath, []byte(fullScript), 0o755))
+	scriptPath := filepath.Join(t.TempDir(), "script.sh")
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o644))
 
-	t.Setenv("PATH", fmt.Sprintf("%s:%s", dir, os.Getenv("PATH")))
+	t.Setenv("SYSTEMCTL_FAKE_SCRIPT", scriptPath)
+	t.Setenv("PATH", fmt.Sprintf("%s:%s", wrapperDir, os.Getenv("PATH")))
 }
 
 func TestParseProperties(t *testing.T) {
