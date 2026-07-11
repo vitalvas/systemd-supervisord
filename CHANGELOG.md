@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/vitalvas/systemd-supervisord/compare/v0.3.0...v0.4.0) (2026-07-11)
+
+
+### Features
+
+* **cli:** add sockets command for activation status ([67c6825](https://github.com/vitalvas/systemd-supervisord/commit/67c68254ba44ae83e98ec8f03932b396dfad2ec2))
+* **socketactivation:** on-demand unit activation proxy ([ba5dcda](https://github.com/vitalvas/systemd-supervisord/commit/ba5dcda181d7ee2793477d17cc6f20621acadfad))
+
+
+### Bug Fixes
+
+* **socketactivation:** harden idle lifecycle ([e221d8f](https://github.com/vitalvas/systemd-supervisord/commit/e221d8fb5e4b6719643bea053f95cb1905038f95))
+
 ## [0.3.0](https://github.com/vitalvas/systemd-supervisord/compare/v0.2.4...v0.3.0) (2026-05-21)
 
 
