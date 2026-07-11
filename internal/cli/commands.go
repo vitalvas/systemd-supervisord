@@ -6,11 +6,14 @@ import (
 	"io"
 	"log/slog"
 	"sort"
+	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/vitalvas/systemd-supervisord/internal/config"
 	"github.com/vitalvas/systemd-supervisord/internal/daemon"
+	"github.com/vitalvas/systemd-supervisord/internal/socketactivation"
 	"github.com/vitalvas/systemd-supervisord/internal/statemanager"
 )
 
@@ -30,6 +33,7 @@ func NewRootCommand() *cobra.Command {
 		newRunCmd(&configPath),
 		newListCmd(&socketPath),
 		newStatusCmd(&socketPath),
+		newSocketsCmd(&socketPath),
 		newStartCmd(&socketPath),
 		newStopCmd(&socketPath),
 		newRestartCmd(&socketPath),
@@ -96,6 +100,25 @@ func newStatusCmd(socketPath *string) *cobra.Command {
 			}
 
 			return PrintAllStatuses(cmd.OutOrStdout(), resp.Data)
+		},
+	}
+}
+
+func newSocketsCmd(socketPath *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "sockets",
+		Short: "Show socket-activation listeners and their state",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			resp, err := SendRequest(*socketPath, daemon.Request{Command: "sockets"})
+			if err != nil {
+				return err
+			}
+
+			if !resp.Success {
+				return fmt.Errorf("%s", resp.Error)
+			}
+
+			return PrintSocketStatuses(cmd.OutOrStdout(), resp.Data)
 		},
 	}
 }
@@ -210,6 +233,50 @@ func PrintUnitStatus(w io.Writer, data interface{}) error {
 
 	if !status.LastTransition.IsZero() {
 		fmt.Fprintf(tw, "Last Transition:\t%s\n", status.LastTransition.Format("2006-01-02 15:04:05"))
+	}
+
+	return tw.Flush()
+}
+
+func PrintSocketStatuses(w io.Writer, data interface{}) error {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	var statuses []socketactivation.Status
+	if err := json.Unmarshal(raw, &statuses); err != nil {
+		return err
+	}
+
+	sort.Slice(statuses, func(i, j int) bool {
+		return statuses[i].Unit < statuses[j].Unit
+	})
+
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+
+	fmt.Fprintf(tw, "UNIT\tLISTEN\tPROTOCOL\tBACKEND\tSTATE\tCONNS\tIDLE\n")
+
+	for _, s := range statuses {
+		state := "stopped"
+		if s.Running {
+			state = "running"
+		}
+
+		idle := "-"
+		if s.Running && s.ActiveConnections == 0 {
+			idle = time.Duration(s.IdleSeconds * float64(time.Second)).Round(time.Second).String()
+		}
+
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
+			s.Unit,
+			s.Listen,
+			strings.Join(s.Protocol, ","),
+			s.Backend,
+			state,
+			s.ActiveConnections,
+			idle,
+		)
 	}
 
 	return tw.Flush()

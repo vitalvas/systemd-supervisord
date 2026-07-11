@@ -203,6 +203,17 @@ socket_activation:
     idle_timeout: 15m
 ```
 
+Inspect the live state of all listeners with the `sockets` CLI command:
+
+```
+$ systemd-supervisord sockets
+UNIT                       LISTEN            PROTOCOL  BACKEND           STATE    CONNS  IDLE
+coredns.service            127.0.0.1:53      udp,tcp   127.0.0.1:5353    running  0      42s
+llama@gemma-4-e4b.service  127.0.0.1:4101    tcp       127.0.0.1:5101    stopped  0      -
+```
+
+`STATE` is `running` when the backend unit is active or `stopped` when idle. `CONNS` is the current number of active connections (TCP) or sessions (UDP). `IDLE` is the time since the last traffic while running and idle, or `-` when a connection is active or the unit is stopped.
+
 ## CLI Usage
 
 ```
@@ -213,6 +224,7 @@ Commands:
   check       Validate configuration file
   list        List supervised units
   status      Show status of supervised units
+  sockets     Show socket-activation listeners and their state
   start       Start a supervised unit
   stop        Stop a supervised unit
   restart     Restart a supervised unit

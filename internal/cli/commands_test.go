@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/vitalvas/systemd-supervisord/internal/daemon"
+	"github.com/vitalvas/systemd-supervisord/internal/socketactivation"
 	"github.com/vitalvas/systemd-supervisord/internal/statemanager"
 	"github.com/vitalvas/systemd-supervisord/internal/systemd"
 )
@@ -276,6 +277,143 @@ func TestPrintAllStatuses(t *testing.T) {
 
 		output := buf.String()
 		assert.Contains(t, output, "UNIT")
+	})
+}
+
+func TestPrintSocketStatuses(t *testing.T) {
+	t.Run("listeners sorted by unit", func(t *testing.T) {
+		statuses := []socketactivation.Status{
+			{
+				Name:              "gemma",
+				Unit:              "llama@gemma.service",
+				Listen:            "127.0.0.1:4101",
+				Protocol:          []string{"tcp"},
+				Backend:           "127.0.0.1:5101",
+				Running:           true,
+				ActiveConnections: 2,
+			},
+			{
+				Name:        "coredns",
+				Unit:        "coredns.service",
+				Listen:      "127.0.0.1:53",
+				Protocol:    []string{"udp", "tcp"},
+				Backend:     "127.0.0.1:5353",
+				Running:     true,
+				IdleSeconds: 42,
+			},
+			{
+				Name:     "web",
+				Unit:     "web.service",
+				Listen:   "127.0.0.1:8080",
+				Protocol: []string{"tcp"},
+				Backend:  "127.0.0.1:9090",
+				Running:  false,
+			},
+		}
+
+		buf := new(bytes.Buffer)
+		require.NoError(t, PrintSocketStatuses(buf, statuses))
+
+		output := buf.String()
+		assert.Contains(t, output, "UNIT")
+		assert.Contains(t, output, "PROTOCOL")
+		assert.Contains(t, output, "udp,tcp")
+		assert.Contains(t, output, "running")
+		assert.Contains(t, output, "stopped")
+		assert.Contains(t, output, "42s")
+
+		corednsIdx := strings.Index(output, "coredns.service")
+		llamaIdx := strings.Index(output, "llama@gemma.service")
+		webIdx := strings.Index(output, "web.service")
+		assert.Greater(t, llamaIdx, corednsIdx)
+		assert.Greater(t, webIdx, llamaIdx)
+	})
+
+	t.Run("active connection shows dash for idle", func(t *testing.T) {
+		statuses := []socketactivation.Status{{
+			Unit:              "app.service",
+			Listen:            "127.0.0.1:1000",
+			Protocol:          []string{"tcp"},
+			Backend:           "127.0.0.1:2000",
+			Running:           true,
+			ActiveConnections: 1,
+			IdleSeconds:       0,
+		}}
+
+		buf := new(bytes.Buffer)
+		require.NoError(t, PrintSocketStatuses(buf, statuses))
+
+		// The idle column is a dash while a connection is active.
+		lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+		require.Len(t, lines, 2)
+		assert.True(t, strings.HasSuffix(lines[1], "-"))
+	})
+
+	t.Run("empty list", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		require.NoError(t, PrintSocketStatuses(buf, []socketactivation.Status{}))
+
+		assert.Contains(t, buf.String(), "UNIT")
+	})
+}
+
+func TestSocketsCmd(t *testing.T) {
+	t.Run("lists listeners", func(t *testing.T) {
+		statuses := []socketactivation.Status{{
+			Name:     "coredns",
+			Unit:     "coredns.service",
+			Listen:   "127.0.0.1:53",
+			Protocol: []string{"udp", "tcp"},
+			Backend:  "127.0.0.1:5353",
+			Running:  false,
+		}}
+
+		socketPath := startMockDaemon(t, func(req daemon.Request) daemon.Response {
+			assert.Equal(t, "sockets", req.Command)
+
+			return daemon.Response{Success: true, Data: statuses}
+		})
+
+		root := NewRootCommand()
+
+		buf := new(bytes.Buffer)
+		root.SetOut(buf)
+		root.SetErr(buf)
+		root.SetArgs([]string{"--socket", socketPath, "sockets"})
+
+		require.NoError(t, root.Execute())
+
+		output := buf.String()
+		assert.Contains(t, output, "coredns.service")
+		assert.Contains(t, output, "udp,tcp")
+	})
+
+	t.Run("error response", func(t *testing.T) {
+		socketPath := startMockDaemon(t, func(_ daemon.Request) daemon.Response {
+			return daemon.Response{Success: false, Error: "boom"}
+		})
+
+		root := NewRootCommand()
+
+		buf := new(bytes.Buffer)
+		root.SetOut(buf)
+		root.SetErr(buf)
+		root.SetArgs([]string{"--socket", socketPath, "sockets"})
+
+		err := root.Execute()
+		assert.Error(t, err)
+	})
+
+	t.Run("connection failure", func(t *testing.T) {
+		root := NewRootCommand()
+
+		buf := new(bytes.Buffer)
+		root.SetOut(buf)
+		root.SetErr(buf)
+		root.SetArgs([]string{"--socket", "/tmp/nonexistent-cli-sockets-test.sock", "sockets"})
+
+		err := root.Execute()
+		assert.Error(t, err)
 	})
 }
 

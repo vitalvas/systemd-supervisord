@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/v22/activation"
+
+	"github.com/vitalvas/systemd-supervisord/internal/socketactivation"
 )
 
 type Request struct {
@@ -133,6 +135,13 @@ func (d *Daemon) processRequest(ctx context.Context, req Request) Response {
 		}
 
 		return Response{Success: true, Data: d.sm.AllStatuses()}
+
+	case "sockets":
+		if d.socketMgr == nil {
+			return Response{Success: true, Data: []socketactivation.Status{}}
+		}
+
+		return Response{Success: true, Data: d.socketMgr.Statuses()}
 
 	case "start":
 		if req.UnitName == "" {

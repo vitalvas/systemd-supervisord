@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/vitalvas/systemd-supervisord/internal/config"
+	"github.com/vitalvas/systemd-supervisord/internal/socketactivation"
 	"github.com/vitalvas/systemd-supervisord/internal/systemd"
 )
 
@@ -293,6 +294,45 @@ func TestProcessRequest(t *testing.T) {
 		assert.False(t, resp.Success)
 		assert.Contains(t, resp.Error, "unknown command")
 		assert.Contains(t, resp.Error, "invalid")
+	})
+
+	t.Run("sockets with none configured", func(t *testing.T) {
+		mgr := newMockManager()
+		cfg := &config.Config{}
+		d := newTestDaemon(mgr, cfg)
+
+		resp := d.processRequest(context.Background(), Request{Command: "sockets"})
+
+		assert.True(t, resp.Success)
+		statuses, ok := resp.Data.([]socketactivation.Status)
+		require.True(t, ok)
+		assert.Empty(t, statuses)
+	})
+
+	t.Run("sockets returns configured listeners", func(t *testing.T) {
+		mgr := newMockManager()
+		cfg := &config.Config{}
+		d := newTestDaemon(mgr, cfg)
+
+		entries := []config.SocketActivationConfig{{
+			Unit:     "coredns.service",
+			Name:     "coredns",
+			Listen:   "127.0.0.1:53",
+			Protocol: []string{"udp", "tcp"},
+			Backend:  "127.0.0.1:5353",
+		}}
+		d.socketMgr = socketactivation.NewManager(entries, d.mgr)
+
+		resp := d.processRequest(context.Background(), Request{Command: "sockets"})
+
+		assert.True(t, resp.Success)
+		statuses, ok := resp.Data.([]socketactivation.Status)
+		require.True(t, ok)
+		require.Len(t, statuses, 1)
+		assert.Equal(t, "coredns.service", statuses[0].Unit)
+		assert.Equal(t, "127.0.0.1:53", statuses[0].Listen)
+		assert.Equal(t, []string{"udp", "tcp"}, statuses[0].Protocol)
+		assert.False(t, statuses[0].Running)
 	})
 }
 
