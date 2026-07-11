@@ -74,6 +74,8 @@ func (a *Activator) startUDP(ctx context.Context) (func(), error) {
 }
 
 func (p *udpProxy) readLoop(ctx context.Context) {
+	defer p.closeAllSessions()
+
 	buf := make([]byte, 64*1024)
 
 	for {
@@ -126,6 +128,14 @@ func (p *udpProxy) session(ctx context.Context, addr net.Addr) (*udpSession, err
 	}
 	p.mu.Unlock()
 
+	p.activator.connOpened()
+	sessionActive := true
+	defer func() {
+		if sessionActive {
+			p.activator.connClosed()
+		}
+	}()
+
 	if err := p.activator.ensureRunning(ctx); err != nil {
 		return nil, err
 	}
@@ -148,8 +158,7 @@ func (p *udpProxy) session(ctx context.Context, addr net.Addr) (*udpSession, err
 
 	p.sessions[key] = s
 	p.mu.Unlock()
-
-	p.activator.connOpened()
+	sessionActive = false
 
 	go p.replyLoop(ctx, addr, s)
 
@@ -209,6 +218,18 @@ func (p *udpProxy) closeSession(key string) {
 
 	_ = s.backend.Close()
 	p.activator.connClosed()
+}
+
+func (p *udpProxy) closeAllSessions() {
+	p.mu.Lock()
+	sessions := p.sessions
+	p.sessions = make(map[string]*udpSession)
+	p.mu.Unlock()
+
+	for _, s := range sessions {
+		_ = s.backend.Close()
+		p.activator.connClosed()
+	}
 }
 
 // expireLoop periodically tears down sessions that have seen no traffic within

@@ -54,10 +54,12 @@ type Activator struct {
 	mu         sync.Mutex
 	running    bool
 	starting   bool
+	stopping   bool
 	startErr   error
 	active     int
 	lastActive time.Time
 	startWait  chan struct{}
+	stopWait   chan struct{}
 }
 
 // New builds an Activator for the given entry using the supplied unit
@@ -177,6 +179,9 @@ func (a *Activator) acceptLoop(ctx context.Context, ln net.Listener) {
 func (a *Activator) handle(ctx context.Context, client net.Conn) {
 	defer client.Close()
 
+	a.connOpened()
+	defer a.connClosed()
+
 	if err := a.ensureRunning(ctx); err != nil {
 		a.logger.Error("backend not available", "error", err)
 
@@ -192,9 +197,6 @@ func (a *Activator) handle(ctx context.Context, client net.Conn) {
 
 	defer backend.Close()
 
-	a.connOpened()
-	defer a.connClosed()
-
 	a.logger.Debug("proxying connection", "remote", client.RemoteAddr().String())
 
 	relay(client, backend, a.markTraffic)
@@ -203,60 +205,74 @@ func (a *Activator) handle(ctx context.Context, client net.Conn) {
 // ensureRunning guarantees the unit is started and healthy. Concurrent callers
 // share a single startup attempt.
 func (a *Activator) ensureRunning(ctx context.Context) error {
-	a.mu.Lock()
+	for {
+		a.mu.Lock()
 
-	if a.running {
-		a.mu.Unlock()
+		if a.stopping {
+			wait := a.stopWait
+			a.mu.Unlock()
 
-		return nil
-	}
-
-	if a.starting {
-		wait := a.startWait
-		a.mu.Unlock()
-
-		select {
-		case <-wait:
-		case <-ctx.Done():
-			return ctx.Err()
+			select {
+			case <-wait:
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
 
-		a.mu.Lock()
-		err := a.startErr
-		running := a.running
-		a.mu.Unlock()
+		if a.running {
+			a.mu.Unlock()
 
-		if running {
 			return nil
 		}
 
-		if err != nil {
-			return err
+		if a.starting {
+			wait := a.startWait
+			a.mu.Unlock()
+
+			select {
+			case <-wait:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+
+			a.mu.Lock()
+			err := a.startErr
+			running := a.running
+			a.mu.Unlock()
+
+			if running {
+				return nil
+			}
+
+			if err != nil {
+				return err
+			}
+
+			return errors.New("backend failed to start")
 		}
 
-		return errors.New("backend failed to start")
+		a.starting = true
+		a.startErr = nil
+		a.startWait = make(chan struct{})
+		wait := a.startWait
+		a.mu.Unlock()
+
+		err := a.startAndWait(ctx)
+
+		a.mu.Lock()
+		a.starting = false
+		a.startErr = err
+
+		if err == nil {
+			a.running = true
+		}
+
+		close(wait)
+		a.mu.Unlock()
+
+		return err
 	}
-
-	a.starting = true
-	a.startErr = nil
-	a.startWait = make(chan struct{})
-	wait := a.startWait
-	a.mu.Unlock()
-
-	err := a.startAndWait(ctx)
-
-	a.mu.Lock()
-	a.starting = false
-	a.startErr = err
-
-	if err == nil {
-		a.running = true
-	}
-
-	close(wait)
-	a.mu.Unlock()
-
-	return err
 }
 
 func (a *Activator) startAndWait(ctx context.Context) error {
@@ -281,9 +297,22 @@ func (a *Activator) startAndWait(ctx context.Context) error {
 
 		select {
 		case <-waitCtx.Done():
-			return fmt.Errorf("backend %s not healthy within %s", a.cfg.Unit, a.cfg.StartupTimeout)
+			err := fmt.Errorf("backend %s not healthy within %s", a.cfg.Unit, a.cfg.StartupTimeout)
+			if errors.Is(waitCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+				a.stopAfterFailedStart(ctx, err)
+			}
+
+			return err
 		case <-ticker.C:
 		}
+	}
+}
+
+func (a *Activator) stopAfterFailedStart(ctx context.Context, cause error) {
+	a.logger.Warn("stopping backend unit after failed startup", "unit", a.cfg.Unit, "error", cause)
+
+	if err := a.ctrl.Stop(ctx, a.cfg.Unit); err != nil {
+		a.logger.Error("stopping failed startup unit failed", "unit", a.cfg.Unit, "error", err)
 	}
 }
 
@@ -328,7 +357,7 @@ func (a *Activator) idleLoop(ctx context.Context) {
 func (a *Activator) maybeStopIdle(ctx context.Context) {
 	a.mu.Lock()
 
-	if !a.running || a.active > 0 {
+	if !a.running || a.starting || a.stopping || a.active > 0 {
 		a.mu.Unlock()
 
 		return
@@ -341,12 +370,23 @@ func (a *Activator) maybeStopIdle(ctx context.Context) {
 		return
 	}
 
-	a.running = false
+	a.stopping = true
+	a.stopWait = make(chan struct{})
+	wait := a.stopWait
 	a.mu.Unlock()
 
 	a.logger.Info("stopping idle backend unit", "unit", a.cfg.Unit, "idle_for", idleFor)
 
 	if err := a.ctrl.Stop(ctx, a.cfg.Unit); err != nil {
 		a.logger.Error("stopping idle unit failed", "unit", a.cfg.Unit, "error", err)
+	} else {
+		a.mu.Lock()
+		a.running = false
+		a.mu.Unlock()
 	}
+
+	a.mu.Lock()
+	a.stopping = false
+	close(wait)
+	a.mu.Unlock()
 }

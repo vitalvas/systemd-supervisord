@@ -22,6 +22,7 @@ type mockController struct {
 	starts   int
 	stops    int
 	startErr error
+	stopErr  error
 }
 
 func (m *mockController) Start(_ context.Context, _ string) error {
@@ -39,7 +40,7 @@ func (m *mockController) Stop(_ context.Context, _ string) error {
 
 	m.stops++
 
-	return nil
+	return m.stopErr
 }
 
 func (m *mockController) startCount() int {
@@ -54,6 +55,39 @@ func (m *mockController) stopCount() int {
 	defer m.mu.Unlock()
 
 	return m.stops
+}
+
+type blockingStopController struct {
+	starts      atomic.Int32
+	stops       atomic.Int32
+	stopStarted chan struct{}
+	allowStop   chan struct{}
+	stopOnce    sync.Once
+}
+
+func newBlockingStopController() *blockingStopController {
+	return &blockingStopController{
+		stopStarted: make(chan struct{}),
+		allowStop:   make(chan struct{}),
+	}
+}
+
+func (m *blockingStopController) Start(_ context.Context, _ string) error {
+	m.starts.Add(1)
+
+	return nil
+}
+
+func (m *blockingStopController) Stop(ctx context.Context, _ string) error {
+	m.stops.Add(1)
+	m.stopOnce.Do(func() { close(m.stopStarted) })
+
+	select {
+	case <-m.allowStop:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 type fakeProbe struct {
@@ -259,6 +293,7 @@ func TestActivatorStartupTimeout(t *testing.T) {
 	running := a.running
 	a.mu.Unlock()
 	assert.False(t, running)
+	assert.Equal(t, 1, ctrl.stopCount())
 }
 
 func TestActivatorStartErrorPropagates(t *testing.T) {
@@ -373,6 +408,83 @@ func TestActivatorIdleStop(t *testing.T) {
 	running := a.running
 	a.mu.Unlock()
 	assert.False(t, running)
+}
+
+func TestActivatorIdleStopFailureKeepsRunning(t *testing.T) {
+	ctrl := &mockController{stopErr: errors.New("stop failed")}
+	probe := &fakeProbe{}
+	probe.healthy.Store(true)
+
+	cfg := baseConfig("127.0.0.1:4101", "127.0.0.1:5101")
+	a, clk := newTestActivator(t, cfg, ctrl, probe)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a.mu.Lock()
+	a.running = true
+	a.lastActive = clk.Now()
+	a.mu.Unlock()
+
+	clk.advance(cfg.IdleTimeout + time.Second)
+	a.maybeStopIdle(ctx)
+
+	assert.Equal(t, 1, ctrl.stopCount())
+
+	a.mu.Lock()
+	running := a.running
+	stopping := a.stopping
+	a.mu.Unlock()
+
+	assert.True(t, running)
+	assert.False(t, stopping)
+}
+
+func TestActivatorWaitsForIdleStopBeforeRestart(t *testing.T) {
+	ctrl := newBlockingStopController()
+	probe := &fakeProbe{}
+	probe.healthy.Store(true)
+
+	cfg := baseConfig("127.0.0.1:4101", "127.0.0.1:5101")
+	a, clk := newTestActivator(t, cfg, ctrl, probe)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a.mu.Lock()
+	a.running = true
+	a.lastActive = clk.Now()
+	a.mu.Unlock()
+
+	clk.advance(cfg.IdleTimeout + time.Second)
+
+	go a.maybeStopIdle(ctx)
+
+	select {
+	case <-ctrl.stopStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("idle stop did not start")
+	}
+
+	a.connOpened()
+	defer a.connClosed()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- a.ensureRunning(ctx)
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("ensureRunning returned before idle stop completed: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(ctrl.allowStop)
+
+	require.NoError(t, <-done)
+	assert.Equal(t, int32(1), ctrl.starts.Load())
+	assert.Equal(t, int32(1), ctrl.stops.Load())
 }
 
 func TestActivatorIdleNotStoppedWithActiveConnection(t *testing.T) {

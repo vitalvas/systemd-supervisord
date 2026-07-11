@@ -166,6 +166,40 @@ func TestActivatorUDPSessionTracking(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 }
 
+func TestActivatorUDPClosesSessionsOnCancel(t *testing.T) {
+	backend := udpEchoServer(t)
+	listen := freeUDPAddr(t)
+
+	ctrl := &mockController{}
+	probe := &fakeProbe{}
+	probe.healthy.Store(true)
+
+	cfg := udpConfig(listen, backend.LocalAddr().String())
+	a, _ := newTestActivator(t, cfg, ctrl, probe)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	require.NoError(t, a.Start(ctx))
+
+	roundTrip(t, "udp", listen, "query")
+
+	require.Eventually(t, func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+
+		return a.active == 1
+	}, 2*time.Second, 10*time.Millisecond)
+
+	cancel()
+
+	require.Eventually(t, func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+
+		return a.active == 0
+	}, 2*time.Second, 10*time.Millisecond)
+}
+
 func TestActivatorUDPSharedLifecycleWithTCP(t *testing.T) {
 	tcpBackend := echoServer(t)
 	udpBackend := udpEchoServer(t)
