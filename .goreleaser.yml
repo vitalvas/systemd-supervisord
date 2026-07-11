@@ -18,6 +18,8 @@ builds:
       - -X main.version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
+upx:
+  - enabled: true
 nfpms:
   - id: systemd-supervisord
     package_name: systemd-supervisord
