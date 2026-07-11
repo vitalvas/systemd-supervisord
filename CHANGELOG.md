@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/vitalvas/systemd-supervisord/compare/v0.4.0...v0.4.1) (2026-07-11)
+
+
+### Bug Fixes
+
+* add upx to build ([8c0ed3c](https://github.com/vitalvas/systemd-supervisord/commit/8c0ed3cfdbb3eaac8e87d7bdd502a4fc3412fb41))
+
 ## [0.4.0](https://github.com/vitalvas/systemd-supervisord/compare/v0.3.0...v0.4.0) (2026-07-11)
 
 
