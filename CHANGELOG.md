@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/vitalvas/systemd-supervisord/compare/v0.4.1...v0.5.0) (2026-07-13)
+
+
+### Features
+
+* **socketactivation:** monitor and restart backends while running ([5eeab94](https://github.com/vitalvas/systemd-supervisord/commit/5eeab94aa6d40ef197197207a51b822e7b1367b2))
+
+
+### Bug Fixes
+
+* use .socket extension for default daemon socket path ([2d9a514](https://github.com/vitalvas/systemd-supervisord/commit/2d9a5144ef747d4b971854abef3fe20556859b02))
+
 ## [0.4.1](https://github.com/vitalvas/systemd-supervisord/compare/v0.4.0...v0.4.1) (2026-07-11)
 
 
