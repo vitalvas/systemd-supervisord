@@ -339,7 +339,7 @@ func TestProcessRequest(t *testing.T) {
 func shortSocketPath(t *testing.T) string {
 	t.Helper()
 
-	f, err := os.CreateTemp("", "sd-*.sock")
+	f, err := os.CreateTemp("", "sd-*.socket")
 	require.NoError(t, err)
 
 	path := f.Name()
@@ -370,7 +370,7 @@ func TestCreateListener(t *testing.T) {
 
 	t.Run("fails for invalid path", func(t *testing.T) {
 		mgr := newMockManager()
-		cfg := &config.Config{Socket: "/nonexistent/deeply/nested/path/test.sock"}
+		cfg := &config.Config{Socket: "/nonexistent/deeply/nested/path/test.socket"}
 		d := newTestDaemon(mgr, cfg)
 
 		_, err := d.createListener()
@@ -479,7 +479,7 @@ func TestListenSocket(t *testing.T) {
 	t.Run("fails when socket path is invalid", func(t *testing.T) {
 		mgr := newMockManager()
 		cfg := &config.Config{
-			Socket: "/nonexistent/deeply/nested/path/test.sock",
+			Socket: "/nonexistent/deeply/nested/path/test.socket",
 		}
 		d := newTestDaemon(mgr, cfg)
 

@@ -984,7 +984,7 @@ func TestRun(t *testing.T) {
 		require.NoError(t, err)
 		defer os.Remove(tmpFile.Name())
 
-		configData := `socket: /nonexistent/deeply/nested/path/test.sock
+		configData := `socket: /nonexistent/deeply/nested/path/test.socket
 units:
   test.service:
     enabled: false

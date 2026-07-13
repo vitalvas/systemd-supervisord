@@ -35,7 +35,7 @@ func startTestSocketServer(t *testing.T, socketPath string, handler func(net.Con
 func tempSocketPath(t *testing.T) string {
 	t.Helper()
 
-	f, err := os.CreateTemp("", "test-*.sock")
+	f, err := os.CreateTemp("", "test-*.socket")
 	require.NoError(t, err)
 
 	path := f.Name()
@@ -118,7 +118,7 @@ func TestSendRequest(t *testing.T) {
 	})
 
 	t.Run("connection_failure_nonexistent_socket", func(t *testing.T) {
-		socketPath := filepath.Join(os.TempDir(), "nonexistent_test.sock")
+		socketPath := filepath.Join(os.TempDir(), "nonexistent_test.socket")
 
 		req := daemon.Request{
 			Command: "status",

@@ -130,9 +130,9 @@ func TestChecker(t *testing.T) {
 
 	t.Run("unix socket healthy", func(t *testing.T) {
 		dir := t.TempDir()
-		sockPath := filepath.Join(dir, "test.sock")
+		socketPath := filepath.Join(dir, "t.socket")
 
-		ln, err := net.Listen("unix", sockPath)
+		ln, err := net.Listen("unix", socketPath)
 		require.NoError(t, err)
 		defer ln.Close()
 
@@ -141,7 +141,7 @@ func TestChecker(t *testing.T) {
 		resultCh := make(chan Result, 10)
 
 		c := New("app.service", []config.HealthCheck{
-			{Type: "unix", Unix: &config.UnixHealthCheck{Address: sockPath}, Interval: 100 * time.Millisecond, Timeout: 200 * time.Millisecond, Retries: 10},
+			{Type: "unix", Unix: &config.UnixHealthCheck{Address: socketPath}, Interval: 100 * time.Millisecond, Timeout: 200 * time.Millisecond, Retries: 10},
 		}, resultCh)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
@@ -153,12 +153,12 @@ func TestChecker(t *testing.T) {
 	})
 
 	t.Run("unix socket unhealthy", func(t *testing.T) {
-		sockPath := filepath.Join(os.TempDir(), "nonexistent.sock")
+		socketPath := filepath.Join(os.TempDir(), "nonexistent.socket")
 
 		resultCh := make(chan Result, 10)
 
 		c := New("app.service", []config.HealthCheck{
-			{Type: "unix", Unix: &config.UnixHealthCheck{Address: sockPath}, Interval: 100 * time.Millisecond, Timeout: 100 * time.Millisecond, Retries: 1},
+			{Type: "unix", Unix: &config.UnixHealthCheck{Address: socketPath}, Interval: 100 * time.Millisecond, Timeout: 100 * time.Millisecond, Retries: 1},
 		}, resultCh)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)

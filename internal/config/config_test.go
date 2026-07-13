@@ -57,7 +57,7 @@ func TestLoad(t *testing.T) {
 	t.Run("valid config", func(t *testing.T) {
 		content := `
 log_level: debug
-socket: /tmp/test.sock
+socket: /tmp/test.socket
 units:
   nginx.service:
     enabled: true
@@ -85,7 +85,7 @@ notify:
 		cfg := loadFromString(t, content)
 
 		assert.Equal(t, "debug", cfg.LogLevel)
-		assert.Equal(t, "/tmp/test.sock", cfg.Socket)
+		assert.Equal(t, "/tmp/test.socket", cfg.Socket)
 		require.Len(t, cfg.Units, 2)
 
 		nginx := cfg.Units[0]

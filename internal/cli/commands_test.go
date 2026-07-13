@@ -27,7 +27,7 @@ func startMockDaemon(t *testing.T, handler func(req daemon.Request) daemon.Respo
 
 	t.Cleanup(func() { os.RemoveAll(dir) })
 
-	socketPath := filepath.Join(dir, "t.sock")
+	socketPath := filepath.Join(dir, "t.socket")
 
 	ln, err := net.Listen("unix", socketPath)
 	require.NoError(t, err)
@@ -97,9 +97,9 @@ func TestRootCommand(t *testing.T) {
 		require.NotNil(t, cfgFlag)
 		assert.Equal(t, "/etc/systemd-supervisord/config.yaml", cfgFlag.DefValue)
 
-		sockFlag := root.PersistentFlags().Lookup("socket")
-		require.NotNil(t, sockFlag)
-		assert.Equal(t, "/var/run/systemd-supervisord.socket", sockFlag.DefValue)
+		socketFlag := root.PersistentFlags().Lookup("socket")
+		require.NotNil(t, socketFlag)
+		assert.Equal(t, "/var/run/systemd-supervisord.socket", socketFlag.DefValue)
 	})
 
 	t.Run("error propagated from subcommand", func(t *testing.T) {
@@ -182,7 +182,7 @@ func TestListCmd(t *testing.T) {
 		buf := new(bytes.Buffer)
 		root.SetOut(buf)
 		root.SetErr(buf)
-		root.SetArgs([]string{"--socket", "/tmp/nonexistent-cli-test.sock", "list"})
+		root.SetArgs([]string{"--socket", "/tmp/nonexistent-cli-test.socket", "list"})
 
 		err := root.Execute()
 		assert.Error(t, err)
@@ -410,7 +410,7 @@ func TestSocketsCmd(t *testing.T) {
 		buf := new(bytes.Buffer)
 		root.SetOut(buf)
 		root.SetErr(buf)
-		root.SetArgs([]string{"--socket", "/tmp/nonexistent-cli-sockets-test.sock", "sockets"})
+		root.SetArgs([]string{"--socket", "/tmp/nonexistent-cli-sockets-test.socket", "sockets"})
 
 		err := root.Execute()
 		assert.Error(t, err)
@@ -513,7 +513,7 @@ func TestStatusCmd(t *testing.T) {
 		buf := new(bytes.Buffer)
 		root.SetOut(buf)
 		root.SetErr(buf)
-		root.SetArgs([]string{"--socket", "/tmp/nonexistent-cli-test.sock", "status"})
+		root.SetArgs([]string{"--socket", "/tmp/nonexistent-cli-test.socket", "status"})
 
 		err := root.Execute()
 		assert.Error(t, err)
@@ -561,7 +561,7 @@ func TestStartCmd(t *testing.T) {
 		buf := new(bytes.Buffer)
 		root.SetOut(buf)
 		root.SetErr(buf)
-		root.SetArgs([]string{"--socket", "/tmp/nonexistent-cli-test.sock", "start", "nginx.service"})
+		root.SetArgs([]string{"--socket", "/tmp/nonexistent-cli-test.socket", "start", "nginx.service"})
 
 		err := root.Execute()
 		assert.Error(t, err)
@@ -690,7 +690,7 @@ func TestSendUnitCommand(t *testing.T) {
 	})
 
 	t.Run("connection failure", func(t *testing.T) {
-		err := sendUnitCommand(os.Stdout, "/tmp/nonexistent-cli-test.sock", "start", "nginx.service")
+		err := sendUnitCommand(os.Stdout, "/tmp/nonexistent-cli-test.socket", "start", "nginx.service")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "connecting to daemon")
 	})

@@ -272,7 +272,7 @@ health_checks:
     timeout: 5s
     retries: 3
     unix:
-      address: /var/run/myapp.sock
+      address: /var/run/myapp.socket
 ```
 
 | Option    | Type   | Required | Description                |
