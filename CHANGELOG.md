@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/vitalvas/systemd-supervisord/compare/v0.5.0...v0.5.1) (2026-07-13)
+
+
+### Bug Fixes
+
+* use .socket suffix for socket unit ListenStream and paths ([d882c23](https://github.com/vitalvas/systemd-supervisord/commit/d882c236f0d38b315bea1dee3fdd90ba1548ad58))
+
 ## [0.5.0](https://github.com/vitalvas/systemd-supervisord/compare/v0.4.1...v0.5.0) (2026-07-13)
 
 
