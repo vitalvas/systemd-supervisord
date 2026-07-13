@@ -27,7 +27,7 @@ func NewRootCommand() *cobra.Command {
 	}
 
 	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "/etc/systemd-supervisord/config.yaml", "config file path")
-	rootCmd.PersistentFlags().StringVarP(&socketPath, "socket", "s", "/var/run/systemd-supervisord.sock", "daemon socket path")
+	rootCmd.PersistentFlags().StringVarP(&socketPath, "socket", "s", "/var/run/systemd-supervisord.socket", "daemon socket path")
 
 	rootCmd.AddCommand(
 		newRunCmd(&configPath),

@@ -164,7 +164,7 @@ units:
 		cfg := loadFromString(t, content)
 
 		assert.Equal(t, "info", cfg.LogLevel)
-		assert.Equal(t, "/var/run/systemd-supervisord.sock", cfg.Socket)
+		assert.Equal(t, "/var/run/systemd-supervisord.socket", cfg.Socket)
 
 		assert.Equal(t, 5*time.Second, cfg.Units[0].Restart.Backoff)
 		assert.Equal(t, 60*time.Second, cfg.Units[0].Restart.Cooldown)

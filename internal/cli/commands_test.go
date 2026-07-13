@@ -99,7 +99,7 @@ func TestRootCommand(t *testing.T) {
 
 		sockFlag := root.PersistentFlags().Lookup("socket")
 		require.NotNil(t, sockFlag)
-		assert.Equal(t, "/var/run/systemd-supervisord.sock", sockFlag.DefValue)
+		assert.Equal(t, "/var/run/systemd-supervisord.socket", sockFlag.DefValue)
 	})
 
 	t.Run("error propagated from subcommand", func(t *testing.T) {

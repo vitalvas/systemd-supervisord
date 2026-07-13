@@ -27,7 +27,7 @@ Create the configuration file at `/etc/systemd-supervisord/config.yaml`.
 | Option               | Description                                    | Default                            |
 |----------------------|------------------------------------------------|------------------------------------|
 | `log_level`          | Log level (`debug`, `info`, `warn`, `error`)   | `info`                             |
-| `socket`             | Unix socket path for CLI communication         | `/var/run/systemd-supervisord.sock`|
+| `socket`             | Unix socket path for CLI communication         | `/var/run/systemd-supervisord.socket`|
 | `discovery_interval` | How often to discover new template instances    | `30s`                              |
 | `http`               | HTTP health endpoint configuration (see below) | disabled                           |
 | `socket_activation`  | On-demand unit activation with a TCP/UDP proxy, keyed by unit name (see below) | disabled |
@@ -232,7 +232,7 @@ Commands:
 
 Flags:
   -c, --config string   config file path (default "/etc/systemd-supervisord/config.yaml")
-  -s, --socket string   daemon socket path (default "/var/run/systemd-supervisord.sock")
+  -s, --socket string   daemon socket path (default "/var/run/systemd-supervisord.socket")
 ```
 
 ## Systemd Service

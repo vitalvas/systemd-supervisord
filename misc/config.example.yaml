@@ -1,5 +1,5 @@
 log_level: info
-socket: /var/run/systemd-supervisord.sock
+socket: /var/run/systemd-supervisord.socket
 discovery_interval: 30s
 
 units:

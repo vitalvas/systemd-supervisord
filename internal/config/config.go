@@ -311,7 +311,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	if cfg.Socket == "" {
-		cfg.Socket = "/var/run/systemd-supervisord.sock"
+		cfg.Socket = "/var/run/systemd-supervisord.socket"
 	}
 
 	if cfg.DiscoveryInterval == 0 {

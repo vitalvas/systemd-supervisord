@@ -22,14 +22,14 @@ In dry-run mode, the daemon loads configuration, discovers units, evaluates heal
 | Option               | Type     | Required | Default                              | Description                                      |
 |----------------------|----------|----------|--------------------------------------|--------------------------------------------------|
 | `log_level`          | string   | No       | `info`                               | Log verbosity. One of: `debug`, `info`, `warn`, `error`. |
-| `socket`             | string   | No       | `/var/run/systemd-supervisord.sock`  | Unix socket path for CLI-to-daemon communication. |
+| `socket`             | string   | No       | `/var/run/systemd-supervisord.socket`  | Unix socket path for CLI-to-daemon communication. |
 | `discovery_interval` | duration | No       | `30s`                                | How often to scan for new template unit instances. Minimum: `5s`. |
 | `units`              | map      | Yes      | --                                   | Map of unit configurations keyed by `name.type`. At least one unit is required. |
 | `notify`             | object   | No       | --                                   | Notification configuration.                      |
 
 ```yaml
 log_level: info
-socket: /var/run/systemd-supervisord.sock
+socket: /var/run/systemd-supervisord.socket
 discovery_interval: 30s
 units: {}
 notify: {}
@@ -499,7 +499,7 @@ systemctl enable --now systemd-supervisord.socket
 systemctl start systemd-supervisord.service
 ```
 
-The socket listens on `/var/run/systemd-supervisord.sock` with mode `0660`.
+The socket listens on `/var/run/systemd-supervisord.socket` with mode `0660`.
 
 ### Manual Socket Creation
 
