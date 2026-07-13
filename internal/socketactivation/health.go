@@ -2,71 +2,61 @@ package socketactivation
 
 import (
 	"context"
-	"fmt"
-	"net"
-	"net/http"
+	"errors"
 	"time"
+
+	"github.com/vitalvas/systemd-supervisord/internal/config"
+	"github.com/vitalvas/systemd-supervisord/internal/healthcheck"
 )
 
-// HealthProbe reports whether the backend is ready to receive connections.
-// It returns nil when the backend is healthy, or an error describing why it is
-// not. Implementations must respect the provided context deadline.
-type HealthProbe interface {
-	Probe(ctx context.Context) error
+// healthProbe reports whether the backend is ready to receive connections.
+// probe returns nil when the backend is healthy, or an error describing why it
+// is not; implementations must respect the provided context deadline. pollInterval
+// reports the cadence to re-run probe during the startup readiness wait.
+type healthProbe interface {
+	probe(ctx context.Context) error
+	pollInterval() time.Duration
 }
 
-// HTTPProbe checks a backend by issuing an HTTP GET and requiring a 2xx status.
-type HTTPProbe struct {
-	url     string
-	timeout time.Duration
-	client  *http.Client
+// checksProbe runs a set of general health checks once and treats the backend
+// as ready only when every check passes. It reuses the shared single-shot probe
+// from the healthcheck package so socket activation and continuous monitoring
+// share identical check semantics.
+type checksProbe struct {
+	checks []config.HealthCheck
 }
 
-func newHTTPProbe(url string, timeout time.Duration) *HTTPProbe {
-	return &HTTPProbe{
-		url:     url,
-		timeout: timeout,
-		client:  &http.Client{Timeout: timeout},
-	}
+func newChecksProbe(checks []config.HealthCheck) *checksProbe {
+	return &checksProbe{checks: checks}
 }
 
-func (p *HTTPProbe) Probe(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.url, nil)
-	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
-	}
+func (p *checksProbe) probe(ctx context.Context) error {
+	var errs []error
 
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("http get %s: %w", p.url, err)
+	for i := range p.checks {
+		if err := healthcheck.Probe(ctx, &p.checks[i]); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
-	defer resp.Body.Close()
+	return errors.Join(errs...)
+}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("http get %s returned status %d", p.url, resp.StatusCode)
+// pollInterval returns the cadence to poll the checks during the startup
+// readiness wait. It is the smallest configured check interval, falling back to
+// one second when no checks are configured.
+func (p *checksProbe) pollInterval() time.Duration {
+	interval := time.Duration(0)
+
+	for i := range p.checks {
+		if interval == 0 || p.checks[i].Interval < interval {
+			interval = p.checks[i].Interval
+		}
 	}
 
-	return nil
-}
-
-// TCPProbe checks a backend by establishing a TCP connection to its address.
-type TCPProbe struct {
-	address string
-	timeout time.Duration
-}
-
-func newTCPProbe(address string, timeout time.Duration) *TCPProbe {
-	return &TCPProbe{address: address, timeout: timeout}
-}
-
-func (p *TCPProbe) Probe(ctx context.Context) error {
-	dialer := net.Dialer{Timeout: p.timeout}
-
-	conn, err := dialer.DialContext(ctx, "tcp", p.address)
-	if err != nil {
-		return fmt.Errorf("tcp dial %s: %w", p.address, err)
+	if interval <= 0 {
+		return time.Second
 	}
 
-	return conn.Close()
+	return interval
 }

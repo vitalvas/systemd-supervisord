@@ -1048,7 +1048,10 @@ socket_activation:
 		content := sa(`  llama@gemma.service:
     listen: "127.0.0.1:4101"
     backend: "127.0.0.1:5101"
-    health_url: "http://127.0.0.1:5101/health"
+    health_checks:
+      - type: http
+        http:
+          address: "http://127.0.0.1:5101/health"
 `)
 		cfg := loadFromString(t, content)
 		require.Len(t, cfg.SocketActivation, 1)
@@ -1058,11 +1061,38 @@ socket_activation:
 		assert.Equal(t, "gemma", sa.Name)
 		assert.Equal(t, "127.0.0.1:4101", sa.Listen)
 		assert.Equal(t, "127.0.0.1:5101", sa.Backend)
-		assert.Equal(t, "http://127.0.0.1:5101/health", sa.HealthURL)
 		assert.Equal(t, DefaultStartupTimeout, sa.StartupTimeout)
 		assert.Equal(t, DefaultIdleTimeout, sa.IdleTimeout)
-		assert.Equal(t, DefaultHealthInterval, sa.HealthInterval)
-		assert.Equal(t, DefaultHealthTimeout, sa.HealthTimeout)
+
+		require.Len(t, sa.HealthChecks, 1)
+		assert.Equal(t, "http", sa.HealthChecks[0].Type)
+		assert.Equal(t, "http://127.0.0.1:5101/health", sa.HealthChecks[0].HTTP.Address)
+		assert.Equal(t, 10*time.Second, sa.HealthChecks[0].Interval)
+		assert.Equal(t, 5*time.Second, sa.HealthChecks[0].Timeout)
+		assert.Equal(t, 3, sa.HealthChecks[0].Retries)
+
+		require.NotNil(t, sa.Restart)
+		assert.True(t, sa.Restart.Enabled)
+		assert.Equal(t, 5*time.Second, sa.Restart.Backoff)
+		assert.Equal(t, 60*time.Second, sa.Restart.Cooldown)
+	})
+
+	t.Run("explicit restart policy preserved", func(t *testing.T) {
+		content := sa(`  llama@gemma.service:
+    listen: "127.0.0.1:4101"
+    backend: "127.0.0.1:5101"
+    restart:
+      enabled: false
+      backoff: 2s
+      cooldown: 30s
+`)
+		cfg := loadFromString(t, content)
+		sa := cfg.SocketActivation[0]
+
+		require.NotNil(t, sa.Restart)
+		assert.False(t, sa.Restart.Enabled)
+		assert.Equal(t, 2*time.Second, sa.Restart.Backoff)
+		assert.Equal(t, 30*time.Second, sa.Restart.Cooldown)
 	})
 
 	t.Run("name derived from key", func(t *testing.T) {
@@ -1082,30 +1112,38 @@ socket_activation:
 		assert.Equal(t, "shard0", byUnit["worker@shard0.service"])
 	})
 
-	t.Run("explicit timeouts preserved", func(t *testing.T) {
+	t.Run("explicit values preserved", func(t *testing.T) {
 		content := sa(`  llama@gemma.service:
     listen: "127.0.0.1:4101"
     backend: "127.0.0.1:5101"
     startup_timeout: 10m
     idle_timeout: 15m
-    health_interval: 1s
-    health_timeout: 3s
+    health_checks:
+      - type: tcp
+        interval: 2s
+        timeout: 3s
+        retries: 5
+        tcp:
+          address: "127.0.0.1:5101"
 `)
 		cfg := loadFromString(t, content)
 		sa := cfg.SocketActivation[0]
 		assert.Equal(t, 10*time.Minute, sa.StartupTimeout)
 		assert.Equal(t, 15*time.Minute, sa.IdleTimeout)
-		assert.Equal(t, time.Second, sa.HealthInterval)
-		assert.Equal(t, 3*time.Second, sa.HealthTimeout)
+
+		require.Len(t, sa.HealthChecks, 1)
+		assert.Equal(t, 2*time.Second, sa.HealthChecks[0].Interval)
+		assert.Equal(t, 3*time.Second, sa.HealthChecks[0].Timeout)
+		assert.Equal(t, 5, sa.HealthChecks[0].Retries)
 	})
 
-	t.Run("no health_url allowed", func(t *testing.T) {
+	t.Run("no health_checks allowed", func(t *testing.T) {
 		content := sa(`  llama@gemma.service:
     listen: "127.0.0.1:4101"
     backend: "127.0.0.1:5101"
 `)
 		cfg := loadFromString(t, content)
-		assert.Empty(t, cfg.SocketActivation[0].HealthURL)
+		assert.Empty(t, cfg.SocketActivation[0].HealthChecks)
 	})
 
 	t.Run("empty unit key rejected", func(t *testing.T) {
@@ -1146,11 +1184,12 @@ socket_activation:
 		assert.Contains(t, err.Error(), "backend")
 	})
 
-	t.Run("invalid health_url rejected", func(t *testing.T) {
+	t.Run("invalid health_check type rejected", func(t *testing.T) {
 		content := sa(`  llama@gemma.service:
     listen: "127.0.0.1:4101"
     backend: "127.0.0.1:5101"
-    health_url: "://bad"
+    health_checks:
+      - type: bogus
 `)
 		_, err := loadStringConfig(content)
 		require.Error(t, err)

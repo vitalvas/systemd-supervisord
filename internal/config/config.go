@@ -25,16 +25,15 @@ type Config struct {
 }
 
 type SocketActivationConfig struct {
-	Unit           string        `yaml:"-" validate:"required"`
-	Name           string        `yaml:"-"`
-	Listen         string        `yaml:"listen" validate:"required,hostname_port"`
-	Protocol       []string      `yaml:"protocol" validate:"dive,oneof=tcp udp"`
-	Backend        string        `yaml:"backend" validate:"required,hostname_port"`
-	HealthURL      string        `yaml:"health_url" validate:"omitempty,url"`
-	StartupTimeout time.Duration `yaml:"startup_timeout" validate:"omitempty,min=1s"`
-	IdleTimeout    time.Duration `yaml:"idle_timeout" validate:"omitempty,min=1s"`
-	HealthInterval time.Duration `yaml:"health_interval" validate:"omitempty,min=100ms"`
-	HealthTimeout  time.Duration `yaml:"health_timeout" validate:"omitempty,min=100ms"`
+	Unit           string         `yaml:"-" validate:"required"`
+	Name           string         `yaml:"-"`
+	Listen         string         `yaml:"listen" validate:"required,hostname_port"`
+	Protocol       []string       `yaml:"protocol" validate:"dive,oneof=tcp udp"`
+	Backend        string         `yaml:"backend" validate:"required,hostname_port"`
+	StartupTimeout time.Duration  `yaml:"startup_timeout" validate:"omitempty,min=1s"`
+	IdleTimeout    time.Duration  `yaml:"idle_timeout" validate:"omitempty,min=1s"`
+	HealthChecks   []HealthCheck  `yaml:"health_checks" validate:"dive"`
+	Restart        *RestartPolicy `yaml:"restart" validate:"omitempty"`
 }
 
 type HTTPConfig struct {
@@ -712,8 +711,6 @@ func (h *HTTPConfig) Enabled() bool {
 const (
 	DefaultStartupTimeout = 30 * time.Second
 	DefaultIdleTimeout    = 5 * time.Minute
-	DefaultHealthInterval = 500 * time.Millisecond
-	DefaultHealthTimeout  = 2 * time.Second
 )
 
 func applySocketActivationDefaults(s *SocketActivationConfig) {
@@ -731,13 +728,9 @@ func applySocketActivationDefaults(s *SocketActivationConfig) {
 		s.IdleTimeout = DefaultIdleTimeout
 	}
 
-	if s.HealthInterval == 0 {
-		s.HealthInterval = DefaultHealthInterval
-	}
+	applyHealthCheckDefaults(s.HealthChecks)
 
-	if s.HealthTimeout == 0 {
-		s.HealthTimeout = DefaultHealthTimeout
-	}
+	s.Restart = restartPolicyWithDefaults(s.Restart)
 }
 
 func dedupeProtocols(protocols []string) []string {
@@ -776,31 +769,44 @@ func validateSocketActivation(entries []SocketActivationConfig) error {
 	return nil
 }
 
+func applyHealthCheckDefaults(checks []HealthCheck) {
+	for i := range checks {
+		if checks[i].Interval == 0 {
+			checks[i].Interval = 10 * time.Second
+		}
+		if checks[i].Timeout == 0 {
+			checks[i].Timeout = 5 * time.Second
+		}
+		if checks[i].Retries == 0 {
+			checks[i].Retries = 3
+		}
+	}
+}
+
 func applyDefaults(u *UnitConfig) {
 	if u.Priority == 0 {
 		u.Priority = DefaultPriority
 	}
 
-	for i := range u.HealthChecks {
-		if u.HealthChecks[i].Interval == 0 {
-			u.HealthChecks[i].Interval = 10 * time.Second
-		}
-		if u.HealthChecks[i].Timeout == 0 {
-			u.HealthChecks[i].Timeout = 5 * time.Second
-		}
-		if u.HealthChecks[i].Retries == 0 {
-			u.HealthChecks[i].Retries = 3
-		}
+	applyHealthCheckDefaults(u.HealthChecks)
+
+	u.Restart = restartPolicyWithDefaults(u.Restart)
+}
+
+// restartPolicyWithDefaults returns policy with the standard backoff and
+// cooldown filled in. A nil policy defaults to enabled, matching the behavior
+// units and monitored socket-activation backends rely on.
+func restartPolicyWithDefaults(policy *RestartPolicy) *RestartPolicy {
+	if policy == nil {
+		policy = &RestartPolicy{Enabled: true}
 	}
 
-	if u.Restart == nil {
-		u.Restart = &RestartPolicy{Enabled: true}
+	if policy.Backoff == 0 {
+		policy.Backoff = 5 * time.Second
+	}
+	if policy.Cooldown == 0 {
+		policy.Cooldown = 60 * time.Second
 	}
 
-	if u.Restart.Backoff == 0 {
-		u.Restart.Backoff = 5 * time.Second
-	}
-	if u.Restart.Cooldown == 0 {
-		u.Restart.Cooldown = 60 * time.Second
-	}
+	return policy
 }

@@ -41,6 +41,7 @@ type Daemon struct {
 	registeredUnits   map[string]struct{}
 	criticalUnits     map[string]struct{}
 	unitCancels       map[string]context.CancelFunc
+	socketMonitors    map[string]context.CancelFunc
 	discoveryReloadCh chan struct{}
 	timerReloadCh     chan struct{}
 	discoveryRunning  bool
@@ -55,6 +56,7 @@ func New(configPath string, dryRun bool) *Daemon {
 		registeredUnits:   make(map[string]struct{}),
 		criticalUnits:     make(map[string]struct{}),
 		unitCancels:       make(map[string]context.CancelFunc),
+		socketMonitors:    make(map[string]context.CancelFunc),
 		discoveryReloadCh: make(chan struct{}, 1),
 		timerReloadCh:     make(chan struct{}, 1),
 	}
@@ -130,7 +132,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 
 	if len(d.cfg.SocketActivation) > 0 {
-		d.socketMgr = socketactivation.NewManager(d.cfg.SocketActivation, d.mgr)
+		d.socketMgr = socketactivation.NewManager(d.cfg.SocketActivation, d.mgr, d)
 		if err := d.socketMgr.Start(ctx); err != nil {
 			return fmt.Errorf("starting socket activation: %w", err)
 		}
@@ -251,6 +253,57 @@ func (d *Daemon) unregisterUnit(unitName string) {
 	d.sm.Unregister(unitName)
 
 	slog.Info("unregistered unit", "unit", unitName)
+}
+
+// Watch plugs a running socket-activation backend into the shared health-check
+// and restart pipeline. It registers the unit with the state manager and
+// restarter and runs a health checker feeding the same result channel used by
+// regular units, so an unhealthy backend is restarted with the configured
+// policy. Monitoring lasts until ctx is cancelled or Unwatch is called. It
+// satisfies socketactivation.HealthSupervisor.
+func (d *Daemon) Watch(ctx context.Context, unit string, checks []config.HealthCheck, policy config.RestartPolicy) {
+	if len(checks) == 0 {
+		return
+	}
+
+	monitorCtx, cancel := context.WithCancel(ctx)
+
+	d.mu.Lock()
+	if existing, ok := d.socketMonitors[unit]; ok {
+		existing()
+	}
+	d.socketMonitors[unit] = cancel
+	d.mu.Unlock()
+
+	d.sm.Register(unit)
+	d.restarter.Register(unit, policy)
+
+	checker := healthcheck.New(unit, checks, d.healthCh)
+	go checker.Run(monitorCtx)
+
+	slog.Info("monitoring socket activation backend", "unit", unit)
+}
+
+// Unwatch stops monitoring a socket-activation backend and removes it from the
+// restart pipeline. It satisfies socketactivation.HealthSupervisor.
+func (d *Daemon) Unwatch(unit string) {
+	d.mu.Lock()
+	cancel, ok := d.socketMonitors[unit]
+	if ok {
+		delete(d.socketMonitors, unit)
+	}
+	d.mu.Unlock()
+
+	if !ok {
+		return
+	}
+
+	cancel()
+
+	d.restarter.Unregister(unit)
+	d.sm.Unregister(unit)
+
+	slog.Info("stopped monitoring socket activation backend", "unit", unit)
 }
 
 func (d *Daemon) findMatchingTemplate(unitName string, templates []*config.UnitConfig) *config.UnitConfig {

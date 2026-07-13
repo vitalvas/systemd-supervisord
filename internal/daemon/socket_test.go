@@ -321,7 +321,7 @@ func TestProcessRequest(t *testing.T) {
 			Protocol: []string{"udp", "tcp"},
 			Backend:  "127.0.0.1:5353",
 		}}
-		d.socketMgr = socketactivation.NewManager(entries, d.mgr)
+		d.socketMgr = socketactivation.NewManager(entries, d.mgr, d)
 
 		resp := d.processRequest(context.Background(), Request{Command: "sockets"})
 

@@ -167,11 +167,17 @@ socket_activation:
     listen: "127.0.0.1:4101"                  # host:port the supervisor listens on
     protocol: [tcp]                            # tcp, udp, or both; default [tcp]
     backend: "127.0.0.1:5101"                 # host:port to proxy traffic to
-    health_url: "http://127.0.0.1:5101/health" # optional; HTTP probe used to detect readiness
     startup_timeout: 10m                       # max time to wait for the backend to become healthy (default 30s)
     idle_timeout: 15m                          # stop the unit after this much idle time (default 5m)
-    health_interval: 500ms                     # how often to probe during startup (default 500ms)
-    health_timeout: 2s                         # per-probe timeout (default 2s)
+    health_checks:                             # optional readiness + liveness checks; same schema as unit health_checks
+      - type: http
+        timeout: 2s
+        http:
+          address: "http://127.0.0.1:5101/health"
+    restart:                                   # optional; restart policy for the running backend (defaults to enabled)
+      enabled: true
+      backoff: 5s
+      cooldown: 60s
 ```
 
 Behavior:
@@ -179,7 +185,9 @@ Behavior:
 - The map key is the systemd unit started on demand. A short log identifier is derived from it (the template instance for `name@instance.service`, otherwise the unit's base name).
 - The proxy operates at layer 4 and is protocol-agnostic, so any backend that speaks over TCP or UDP works (HTTP, gRPC, DNS, and others).
 - `protocol` selects which listeners to bind: `[tcp]` (default), `[udp]`, or `[tcp, udp]`. Each protocol binds its own listener on the same `listen` address, and all listeners share one on-demand unit start and one idle lifecycle.
-- When `health_url` is set, readiness is detected with an HTTP `GET` expecting a `2xx` response. When omitted, a plain TCP dial to `backend` is used instead.
+- Readiness is detected by running `health_checks` (the same `tcp`/`http`/`unix`/`script` schema as unit health checks); the backend is considered ready only when every check passes. The startup poll cadence is the smallest configured check `interval`. When `health_checks` is omitted, the backend is treated as ready as soon as the unit is started.
+- While the backend is running, `health_checks` keep running as liveness checks through the same monitoring and restart pipeline used for regular units: if a check exceeds its `retries`, the backend is restarted per the entry's `restart` policy (backoff and cooldown). Monitoring is active only while the backend is up; it is torn down when the unit is stopped for idleness, so the restarter never fights the idle-stop. When `health_checks` is omitted there is nothing to monitor and the backend simply runs until idle.
+- The `restart` block is optional and uses the same schema as a unit `restart` policy; it defaults to enabled with `5s` backoff and `60s` cooldown when `health_checks` are configured.
 - Concurrent connections that arrive during startup share a single start attempt; the client connection blocks until the backend is healthy or `startup_timeout` elapses.
 - Idle is measured by both active connections and last byte transferred: the unit is stopped only when there are no active connections (or UDP sessions) and no traffic in either direction for `idle_timeout`.
 - If the backend does not become healthy within `startup_timeout`, the pending client connection is closed and the next connection retries.

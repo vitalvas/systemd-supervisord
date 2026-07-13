@@ -12,11 +12,12 @@ import (
 	"github.com/vitalvas/systemd-supervisord/internal/config"
 )
 
-// UnitController starts and stops the backend systemd unit backing a listener.
-// It is the subset of systemd.Manager the activator depends on.
+// UnitController starts, stops, and restarts the backend systemd unit backing a
+// listener. It is the subset of systemd.Manager the activator depends on.
 type UnitController interface {
 	Start(ctx context.Context, unit string) error
 	Stop(ctx context.Context, unit string) error
+	Restart(ctx context.Context, unit string) error
 }
 
 // Dialer establishes a connection to the backend. It is abstracted for testing.
@@ -45,13 +46,15 @@ func (RealClock) Now() time.Time { return time.Now() }
 type Activator struct {
 	cfg       config.SocketActivationConfig
 	ctrl      UnitController
-	probe     HealthProbe
+	probe     healthProbe
+	monitor   *unitMonitor
 	dial      Dialer
 	udpDialer UDPDialer
 	clock     clock
 	logger    *slog.Logger
 
 	mu         sync.Mutex
+	serveCtx   context.Context
 	running    bool
 	starting   bool
 	stopping   bool
@@ -63,23 +66,39 @@ type Activator struct {
 }
 
 // New builds an Activator for the given entry using the supplied unit
-// controller. The health probe is derived from the entry: an HTTP probe when
-// health_url is set, otherwise a TCP probe against the backend address.
-func New(cfg config.SocketActivationConfig, ctrl UnitController) *Activator {
-	var probe HealthProbe
-	if cfg.HealthURL != "" {
-		probe = newHTTPProbe(cfg.HealthURL, cfg.HealthTimeout)
-	} else {
-		probe = newTCPProbe(cfg.Backend, cfg.HealthTimeout)
+// controller. The readiness probe runs the entry's health_checks; when none are
+// configured the backend is considered ready as soon as the unit is started.
+//
+// When health_checks are configured and sup is non-nil, the backend is also
+// continuously monitored while running: the activator registers it with the
+// shared health-check and restart pipeline via sup and unregisters it on
+// idle-stop, so it is checked and restarted only for as long as it is up.
+func New(cfg config.SocketActivationConfig, ctrl UnitController, sup HealthSupervisor) *Activator {
+	var probe healthProbe
+
+	var monitor *unitMonitor
+
+	if len(cfg.HealthChecks) > 0 {
+		probe = newChecksProbe(cfg.HealthChecks)
+
+		if sup != nil {
+			policy := config.RestartPolicy{}
+			if cfg.Restart != nil {
+				policy = *cfg.Restart
+			}
+
+			monitor = newUnitMonitor(sup, cfg.Unit, cfg.HealthChecks, policy)
+		}
 	}
 
 	return &Activator{
-		cfg:    cfg,
-		ctrl:   ctrl,
-		probe:  probe,
-		dial:   defaultDialer,
-		clock:  RealClock{},
-		logger: slog.With("socket_activation", cfg.Name),
+		cfg:     cfg,
+		ctrl:    ctrl,
+		probe:   probe,
+		monitor: monitor,
+		dial:    defaultDialer,
+		clock:   RealClock{},
+		logger:  slog.With("socket_activation", cfg.Name),
 	}
 }
 
@@ -94,6 +113,10 @@ func (a *Activator) Name() string {
 // is cancelled. If any listener fails to bind, previously bound listeners are
 // closed and the error is returned.
 func (a *Activator) Start(ctx context.Context) error {
+	a.mu.Lock()
+	a.serveCtx = ctx
+	a.mu.Unlock()
+
 	protocols := a.cfg.Protocol
 	if len(protocols) == 0 {
 		protocols = []string{"tcp"}
@@ -266,6 +289,7 @@ func (a *Activator) ensureRunning(ctx context.Context) error {
 
 		if err == nil {
 			a.running = true
+			a.startMonitor()
 		}
 
 		close(wait)
@@ -275,6 +299,27 @@ func (a *Activator) ensureRunning(ctx context.Context) error {
 	}
 }
 
+// startMonitor begins continuous monitoring of the running backend. It must be
+// called with a.mu held. It is a no-op when no monitor is configured (no health
+// checks or no supervisor).
+func (a *Activator) startMonitor() {
+	if a.monitor == nil {
+		return
+	}
+
+	a.monitor.start(a.serveCtx)
+}
+
+// stopMonitor ends continuous monitoring of the backend. It must be called with
+// a.mu held and is a no-op when no monitor is configured.
+func (a *Activator) stopMonitor() {
+	if a.monitor == nil {
+		return
+	}
+
+	a.monitor.stop()
+}
+
 func (a *Activator) startAndWait(ctx context.Context) error {
 	a.logger.Info("starting backend unit on demand", "unit", a.cfg.Unit)
 
@@ -282,14 +327,20 @@ func (a *Activator) startAndWait(ctx context.Context) error {
 		return fmt.Errorf("starting unit %s: %w", a.cfg.Unit, err)
 	}
 
+	if a.probe == nil {
+		a.logger.Info("backend started, no health checks configured", "unit", a.cfg.Unit)
+
+		return nil
+	}
+
 	waitCtx, cancel := context.WithTimeout(ctx, a.cfg.StartupTimeout)
 	defer cancel()
 
-	ticker := time.NewTicker(a.cfg.HealthInterval)
+	ticker := time.NewTicker(a.probe.pollInterval())
 	defer ticker.Stop()
 
 	for {
-		if err := a.probe.Probe(waitCtx); err == nil {
+		if err := a.probe.probe(waitCtx); err == nil {
 			a.logger.Info("backend healthy", "unit", a.cfg.Unit)
 
 			return nil
@@ -373,6 +424,7 @@ func (a *Activator) maybeStopIdle(ctx context.Context) {
 	a.stopping = true
 	a.stopWait = make(chan struct{})
 	wait := a.stopWait
+	a.stopMonitor()
 	a.mu.Unlock()
 
 	a.logger.Info("stopping idle backend unit", "unit", a.cfg.Unit, "idle_for", idleFor)

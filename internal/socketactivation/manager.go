@@ -13,11 +13,12 @@ type Manager struct {
 }
 
 // NewManager builds a Manager for the given entries, wiring each activator to
-// the shared unit controller.
-func NewManager(entries []config.SocketActivationConfig, ctrl UnitController) *Manager {
+// the shared unit controller and health supervisor. sup may be nil to disable
+// continuous monitoring of running backends.
+func NewManager(entries []config.SocketActivationConfig, ctrl UnitController, sup HealthSupervisor) *Manager {
 	activators := make([]*Activator, 0, len(entries))
 	for i := range entries {
-		activators = append(activators, New(entries[i], ctrl))
+		activators = append(activators, New(entries[i], ctrl, sup))
 	}
 
 	return &Manager{activators: activators}

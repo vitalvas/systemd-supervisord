@@ -94,7 +94,7 @@ func TestManagerStatuses(t *testing.T) {
 	entries[1].Unit = "b.service"
 	entries[1].Name = "b"
 
-	mgr := NewManager(entries, &mockController{})
+	mgr := NewManager(entries, &mockController{}, nil)
 
 	statuses := mgr.Statuses()
 	require.Len(t, statuses, 2)

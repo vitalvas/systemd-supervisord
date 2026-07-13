@@ -10,59 +10,65 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/vitalvas/systemd-supervisord/internal/config"
 )
 
-func TestHTTPProbe(t *testing.T) {
-	t.Run("healthy on 2xx", func(t *testing.T) {
+func TestChecksProbe(t *testing.T) {
+	t.Run("healthy when all checks pass", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 		defer srv.Close()
 
-		p := newHTTPProbe(srv.URL, time.Second)
-		assert.NoError(t, p.Probe(context.Background()))
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		defer ln.Close()
+
+		p := newChecksProbe([]config.HealthCheck{
+			{Type: "http", Timeout: time.Second, HTTP: &config.HTTPHealthCheck{Address: srv.URL}},
+			{Type: "tcp", Timeout: time.Second, TCP: &config.TCPHealthCheck{Address: ln.Addr().String()}},
+		})
+
+		assert.NoError(t, p.probe(context.Background()))
 	})
 
-	t.Run("unhealthy on 5xx", func(t *testing.T) {
+	t.Run("unhealthy when any check fails", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}))
 		defer srv.Close()
 
-		p := newHTTPProbe(srv.URL, time.Second)
-		err := p.Probe(context.Background())
+		p := newChecksProbe([]config.HealthCheck{
+			{Type: "http", Timeout: time.Second, HTTP: &config.HTTPHealthCheck{Address: srv.URL}},
+		})
+
+		err := p.probe(context.Background())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "503")
 	})
 
 	t.Run("unhealthy on connection refused", func(t *testing.T) {
-		p := newHTTPProbe("http://127.0.0.1:1/health", 200*time.Millisecond)
-		assert.Error(t, p.Probe(context.Background()))
-	})
+		p := newChecksProbe([]config.HealthCheck{
+			{Type: "tcp", Timeout: 200 * time.Millisecond, TCP: &config.TCPHealthCheck{Address: "127.0.0.1:1"}},
+		})
 
-	t.Run("invalid url", func(t *testing.T) {
-		p := newHTTPProbe("://bad", time.Second)
-		assert.Error(t, p.Probe(context.Background()))
+		assert.Error(t, p.probe(context.Background()))
 	})
 }
 
-func TestTCPProbe(t *testing.T) {
-	t.Run("healthy when listening", func(t *testing.T) {
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
-		require.NoError(t, err)
-		defer ln.Close()
+func TestChecksProbePollInterval(t *testing.T) {
+	t.Run("smallest configured interval", func(t *testing.T) {
+		p := newChecksProbe([]config.HealthCheck{
+			{Type: "tcp", Interval: 3 * time.Second, TCP: &config.TCPHealthCheck{Address: "a"}},
+			{Type: "tcp", Interval: time.Second, TCP: &config.TCPHealthCheck{Address: "b"}},
+		})
 
-		p := newTCPProbe(ln.Addr().String(), time.Second)
-		assert.NoError(t, p.Probe(context.Background()))
+		assert.Equal(t, time.Second, p.pollInterval())
 	})
 
-	t.Run("unhealthy when closed", func(t *testing.T) {
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
-		require.NoError(t, err)
-		addr := ln.Addr().String()
-		ln.Close()
-
-		p := newTCPProbe(addr, 200*time.Millisecond)
-		assert.Error(t, p.Probe(context.Background()))
+	t.Run("falls back to one second without checks", func(t *testing.T) {
+		p := newChecksProbe(nil)
+		assert.Equal(t, time.Second, p.pollInterval())
 	})
 }

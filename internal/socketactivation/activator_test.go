@@ -18,11 +18,13 @@ import (
 )
 
 type mockController struct {
-	mu       sync.Mutex
-	starts   int
-	stops    int
-	startErr error
-	stopErr  error
+	mu         sync.Mutex
+	starts     int
+	stops      int
+	restarts   int
+	startErr   error
+	stopErr    error
+	restartErr error
 }
 
 func (m *mockController) Start(_ context.Context, _ string) error {
@@ -41,6 +43,15 @@ func (m *mockController) Stop(_ context.Context, _ string) error {
 	m.stops++
 
 	return m.stopErr
+}
+
+func (m *mockController) Restart(_ context.Context, _ string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.restarts++
+
+	return m.restartErr
 }
 
 func (m *mockController) startCount() int {
@@ -78,6 +89,10 @@ func (m *blockingStopController) Start(_ context.Context, _ string) error {
 	return nil
 }
 
+func (m *blockingStopController) Restart(_ context.Context, _ string) error {
+	return nil
+}
+
 func (m *blockingStopController) Stop(ctx context.Context, _ string) error {
 	m.stops.Add(1)
 	m.stopOnce.Do(func() { close(m.stopStarted) })
@@ -95,7 +110,7 @@ type fakeProbe struct {
 	calls   atomic.Int32
 }
 
-func (p *fakeProbe) Probe(_ context.Context) error {
+func (p *fakeProbe) probe(_ context.Context) error {
 	p.calls.Add(1)
 
 	if p.healthy.Load() {
@@ -103,6 +118,10 @@ func (p *fakeProbe) Probe(_ context.Context) error {
 	}
 
 	return errors.New("not healthy")
+}
+
+func (*fakeProbe) pollInterval() time.Duration {
+	return time.Millisecond
 }
 
 type manualClock struct {
@@ -162,7 +181,7 @@ func echoServer(t *testing.T) net.Listener {
 	return ln
 }
 
-func newTestActivator(t *testing.T, cfg config.SocketActivationConfig, ctrl UnitController, probe HealthProbe) (*Activator, *manualClock) {
+func newTestActivator(t *testing.T, cfg config.SocketActivationConfig, ctrl UnitController, probe healthProbe) (*Activator, *manualClock) {
 	t.Helper()
 
 	clk := &manualClock{now: time.Unix(1000, 0)}
@@ -191,8 +210,6 @@ func baseConfig(listen, backend string) config.SocketActivationConfig {
 		Backend:        backend,
 		StartupTimeout: 2 * time.Second,
 		IdleTimeout:    10 * time.Second,
-		HealthInterval: 10 * time.Millisecond,
-		HealthTimeout:  time.Second,
 	}
 }
 
@@ -359,6 +376,58 @@ func TestActivatorConcurrentConnectionsSingleStart(t *testing.T) {
 	wg.Wait()
 
 	assert.Equal(t, 1, ctrl.startCount())
+}
+
+func TestActivatorMonitorsWhileRunning(t *testing.T) {
+	backend := echoServer(t)
+	listen := freeAddr(t)
+
+	ctrl := &mockController{}
+	probe := &fakeProbe{}
+	probe.healthy.Store(true)
+
+	sup := &fakeSupervisor{}
+
+	cfg := baseConfig(listen, backend.Addr().String())
+	cfg.Unit = "backend.service"
+	cfg.HealthChecks = []config.HealthCheck{{Type: "tcp", TCP: &config.TCPHealthCheck{Address: backend.Addr().String()}}}
+
+	a, clk := newTestActivator(t, cfg, ctrl, probe)
+	a.monitor = newUnitMonitor(sup, cfg.Unit, cfg.HealthChecks, config.RestartPolicy{Enabled: true})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	require.NoError(t, a.Start(ctx))
+
+	conn, err := net.Dial("tcp", listen)
+	require.NoError(t, err)
+
+	conn.Write([]byte("x"))
+	buf := make([]byte, 1)
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	conn.Read(buf)
+	conn.Close()
+
+	// Once the backend is running, it is registered for monitoring.
+	require.Eventually(t, func() bool {
+		return len(sup.watchedUnits()) == 1
+	}, 2*time.Second, 10*time.Millisecond)
+	assert.Equal(t, []string{"backend.service"}, sup.watchedUnits())
+
+	// Wait for the connection to be released, then idle-stop.
+	require.Eventually(t, func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+
+		return a.active == 0 && a.running
+	}, 2*time.Second, 10*time.Millisecond)
+
+	clk.advance(cfg.IdleTimeout + time.Second)
+	a.maybeStopIdle(ctx)
+
+	// Idle-stop unregisters monitoring so the restarter does not fight it.
+	assert.Equal(t, []string{"backend.service"}, sup.unwatchedUnits())
 }
 
 func TestActivatorIdleStop(t *testing.T) {

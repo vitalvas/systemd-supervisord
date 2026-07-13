@@ -166,6 +166,7 @@ func newTestDaemon(mgr systemd.Manager, cfg *config.Config) *Daemon {
 		registeredUnits:   make(map[string]struct{}),
 		criticalUnits:     make(map[string]struct{}),
 		unitCancels:       make(map[string]context.CancelFunc),
+		socketMonitors:    make(map[string]context.CancelFunc),
 		discoveryReloadCh: make(chan struct{}, 1),
 		timerReloadCh:     make(chan struct{}, 1),
 	}
@@ -1056,8 +1057,13 @@ func TestSocketActivationWiring(t *testing.T) {
 			Backend:        backend.Addr().String(),
 			StartupTimeout: 2 * time.Second,
 			IdleTimeout:    10 * time.Second,
-			HealthInterval: 10 * time.Millisecond,
-			HealthTimeout:  time.Second,
+			HealthChecks: []config.HealthCheck{{
+				Type:     "tcp",
+				Interval: 10 * time.Millisecond,
+				Timeout:  time.Second,
+				Retries:  1,
+				TCP:      &config.TCPHealthCheck{Address: backend.Addr().String()},
+			}},
 		}},
 	}
 
@@ -1066,7 +1072,7 @@ func TestSocketActivationWiring(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	d.socketMgr = socketactivation.NewManager(cfg.SocketActivation, d.mgr)
+	d.socketMgr = socketactivation.NewManager(cfg.SocketActivation, d.mgr, d)
 	require.NoError(t, d.socketMgr.Start(ctx))
 
 	conn, err := net.Dial("tcp", listenAddr)
@@ -1086,6 +1092,85 @@ func TestSocketActivationWiring(t *testing.T) {
 	starts := append([]string(nil), mgr.startCalls...)
 	mgr.mu.Unlock()
 	assert.Contains(t, starts, "backend.service")
+}
+
+func TestSocketActivationHealthSupervisor(t *testing.T) {
+	checks := []config.HealthCheck{{
+		Type:     "tcp",
+		Interval: 10 * time.Millisecond,
+		Timeout:  time.Second,
+		Retries:  1,
+		TCP:      &config.TCPHealthCheck{Address: "127.0.0.1:1"},
+	}}
+
+	t.Run("restarts unhealthy backend and cleans up on unwatch", func(t *testing.T) {
+		mgr := newMockManager()
+		d := newTestDaemon(mgr, &config.Config{})
+		d.sdNotifier = systemd.NewNotifier(func() string { return "test" })
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		done := make(chan error, 1)
+		go func() {
+			done <- d.eventLoop(ctx)
+		}()
+
+		policy := config.RestartPolicy{Enabled: true, Backoff: 0, Cooldown: time.Minute}
+		d.Watch(ctx, "backend.service", checks, policy)
+
+		// The unit is registered and its failing check drives a restart.
+		require.Eventually(t, func() bool {
+			return d.sm.GetStatus("backend.service") != nil
+		}, 2*time.Second, 10*time.Millisecond)
+
+		require.Eventually(t, func() bool {
+			mgr.mu.Lock()
+			defer mgr.mu.Unlock()
+
+			return len(mgr.restartCalls) > 0 && mgr.restartCalls[0] == "backend.service"
+		}, 3*time.Second, 10*time.Millisecond)
+
+		d.Unwatch("backend.service")
+
+		assert.Nil(t, d.sm.GetStatus("backend.service"))
+
+		d.mu.Lock()
+		_, monitored := d.socketMonitors["backend.service"]
+		d.mu.Unlock()
+		assert.False(t, monitored)
+
+		cancel()
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("eventLoop did not exit")
+		}
+	})
+
+	t.Run("watch is a no-op without checks", func(t *testing.T) {
+		mgr := newMockManager()
+		d := newTestDaemon(mgr, &config.Config{})
+
+		d.Watch(context.Background(), "backend.service", nil, config.RestartPolicy{Enabled: true})
+
+		assert.Nil(t, d.sm.GetStatus("backend.service"))
+
+		d.mu.Lock()
+		_, monitored := d.socketMonitors["backend.service"]
+		d.mu.Unlock()
+		assert.False(t, monitored)
+	})
+
+	t.Run("unwatch without watch is safe", func(t *testing.T) {
+		mgr := newMockManager()
+		d := newTestDaemon(mgr, &config.Config{})
+
+		assert.NotPanics(t, func() {
+			d.Unwatch("backend.service")
+		})
+	})
 }
 
 func TestReload(t *testing.T) {

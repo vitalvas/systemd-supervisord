@@ -604,7 +604,7 @@ func TestCheckerAdvanced(t *testing.T) {
 	})
 
 	t.Run("unknown health check type", func(t *testing.T) {
-		err := checkEndpoint(context.Background(), &config.HealthCheck{Type: "grpc"})
+		err := Probe(context.Background(), &config.HealthCheck{Type: "grpc"})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown health check type: grpc")
 	})

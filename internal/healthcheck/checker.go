@@ -73,7 +73,7 @@ func (c *Checker) runCheck(ctx context.Context, idx int) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			err := checkEndpoint(ctx, check)
+			err := Probe(ctx, check)
 			if err != nil {
 				c.mu.Lock()
 				c.failures[idx]++
@@ -130,7 +130,11 @@ func (c *Checker) reportStatus() {
 	}
 }
 
-func checkEndpoint(ctx context.Context, hc *config.HealthCheck) error {
+// Probe runs a single health check once and returns nil when it passes or an
+// error describing why it failed. It is the one-shot primitive that the
+// continuous Checker loop builds on; callers needing a readiness probe (such as
+// socket activation) can use it directly without the monitoring loop.
+func Probe(ctx context.Context, hc *config.HealthCheck) error {
 	switch hc.Type {
 	case "tcp":
 		return checkTCP(ctx, hc.Timeout, hc.TCP)
